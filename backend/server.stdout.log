@@ -1,0 +1,12 @@
+==================================================
+BLE Room Positioning System - Backend
+==================================================
+Room: 10.0m x 8.0m
+Anchors: 3
+  scanner-01: (0.0, 0.0)
+  scanner-02: (10.0, 0.0)
+  scanner-03: (5.0, 8.0)
+Calibration: n=2.0, tx=-59 dBm
+==================================================
+ * Serving Flask app 'app'
+ * Debug mode: on

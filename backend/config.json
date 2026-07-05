@@ -1,0 +1,30 @@
+{
+  "room": {
+    "width_m": 10.0,
+    "height_m": 8.0
+  },
+  "anchors": {
+    "scanner-01": {
+      "x": 0.0,
+      "y": 0.0,
+      "label": "Anchor 1 (Bottom-Left)"
+    },
+    "scanner-02": {
+      "x": 10.0,
+      "y": 0.0,
+      "label": "Anchor 2 (Bottom-Right)"
+    },
+    "scanner-03": {
+      "x": 5.0,
+      "y": 8.0,
+      "label": "Anchor 3 (Top-Center)"
+    }
+  },
+  "calibration": {
+    "path_loss_exponent": 2.0,
+    "tx_power_dbm": -59,
+    "min_rssi_threshold": -90,
+    "scan_ttl_seconds": 15
+  },
+  "beacon_filters": []
+}
