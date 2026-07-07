@@ -23,6 +23,8 @@ interface RoomMapProps {
 }
 
 const PAD = 52;
+const MIN_CANVAS_WIDTH = 320;
+const MIN_CANVAS_HEIGHT = 320;
 
 function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -43,7 +45,7 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
     let resizePending = false;
 
     const applyResize = (w: number, h: number) => {
-      if (w === 0 || h === 0) return;
+      if (w <= 0 || h <= 0) return;
       const dpr = window.devicePixelRatio || 1;
       cssW = w;
       cssH = h;
@@ -51,6 +53,16 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
       canvas.height = Math.round(h * dpr);
       canvas.style.width = w + 'px';
       canvas.style.height = h + 'px';
+    };
+
+    const measureAndResize = () => {
+      const rect = wrapper.getBoundingClientRect();
+      const nextW = Math.max(rect.width || wrapper.clientWidth, MIN_CANVAS_WIDTH);
+      const nextH = Math.max(rect.height || wrapper.clientHeight, MIN_CANVAS_HEIGHT);
+
+      if (Math.round(nextW) !== Math.round(cssW) || Math.round(nextH) !== Math.round(cssH)) {
+        applyResize(nextW, nextH);
+      }
     };
 
     const ro = new ResizeObserver((entries) => {
@@ -64,8 +76,7 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
           if (bs) {
             applyResize(bs.inlineSize, bs.blockSize);
           } else {
-            const rect = wrapper.getBoundingClientRect();
-            applyResize(rect.width, rect.height);
+            measureAndResize();
           }
         }
       });
@@ -73,11 +84,10 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
     ro.observe(wrapper);
 
     // Initial size
-    const rect = wrapper.getBoundingClientRect();
-    applyResize(rect.width, rect.height);
-
+    measureAndResize();
 
     const draw = () => {
+      measureAndResize();
       if (cssW === 0 || cssH === 0) return;
       const dpr = window.devicePixelRatio || 1;
       const ctx = canvas.getContext('2d');
@@ -88,8 +98,8 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
       // Scale context so all draw calls use CSS pixels
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const innerW = cssW - PAD * 2;
-      const innerH = cssH - PAD * 2;
+      const innerW = Math.max(1, cssW - PAD * 2);
+      const innerH = Math.max(1, cssH - PAD * 2);
       const scale = Math.min(innerW / roomWidth, innerH / roomHeight);
       const roomPxW = roomWidth * scale;
       const roomPxH = roomHeight * scale;
@@ -98,6 +108,7 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
 
       const toX = (mx: number) => ox + mx * scale;
       const toY = (my: number) => oy + (roomHeight - my) * scale; // Y-flip
+      const roomBottom = oy + roomPxH;
 
       // ── Background ────────────────────────────────────────────────────────
       ctx.fillStyle = '#0a0a0f';
@@ -132,7 +143,7 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
       const xStep = roomWidth <= 10 ? 2 : roomWidth <= 20 ? 4 : 5;
       const yStep = roomHeight <= 10 ? 2 : roomHeight <= 20 ? 4 : 5;
       for (let mx = 0; mx <= roomWidth; mx += xStep) {
-        ctx.fillText(`${mx}m`, toX(mx), oy + roomPxH + 18);
+        ctx.fillText(`${mx}m`, toX(mx), roomBottom + 28);
       }
       ctx.textAlign = 'right';
       for (let my = 0; my <= roomHeight; my += yStep) {
@@ -166,14 +177,22 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
         ctx.fill(); ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Label
+        // Label. Edge anchors use inward labels so they do not collide with axis text.
+        const nearBottom = cy > roomBottom - 26;
+        const nearTop = cy < oy + 26;
+        const labelY = nearBottom ? cy - 22 : cy + 24;
+        const coordY = nearBottom ? cy - 10 : cy + 36;
+        const shouldDrawCoord = !(nearTop && !nearBottom);
+
         ctx.fillStyle = '#e5e7eb';
         ctx.font = "bold 11px 'Outfit',sans-serif";
         ctx.textAlign = 'center';
-        ctx.fillText(a.label || a.anchor_id, cx, cy + 22);
-        ctx.fillStyle = 'rgba(156,163,175,0.55)';
-        ctx.font = "9px 'Fira Code',monospace";
-        ctx.fillText(`(${a.x}, ${a.y})`, cx, cy + 33);
+        ctx.fillText(a.label || a.anchor_id, cx, labelY);
+        if (shouldDrawCoord) {
+          ctx.fillStyle = 'rgba(156,163,175,0.55)';
+          ctx.font = "9px 'Fira Code',monospace";
+          ctx.fillText(`(${a.x}, ${a.y})`, cx, coordY);
+        }
       });
 
       // ── Beacons ───────────────────────────────────────────────────────────
@@ -222,39 +241,43 @@ function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
       });
 
       // ── Legend ────────────────────────────────────────────────────────────
-      const lx = cssW - 155;
-      const ly = 12;
-      ctx.fillStyle = 'rgba(13,13,20,0.88)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(lx, ly, 145, 88, 8);
-      else ctx.rect(lx, ly, 145, 88);
-      ctx.fill(); ctx.stroke();
+      if (cssW >= 520) {
+        const legendW = 132;
+        const legendH = 78;
+        const lx = Math.max(12, cssW - legendW - 12);
+        const ly = Math.max(12, oy + 12);
+        ctx.fillStyle = 'rgba(13,13,20,0.78)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(lx, ly, legendW, legendH, 8);
+        else ctx.rect(lx, ly, legendW, legendH);
+        ctx.fill(); ctx.stroke();
 
-      ctx.fillStyle = '#e5e7eb';
-      ctx.font = "bold 11px 'Outfit',sans-serif";
-      ctx.textAlign = 'left';
-      ctx.fillText('Legend', lx + 12, ly + 17);
+        ctx.fillStyle = '#e5e7eb';
+        ctx.font = "bold 10px 'Outfit',sans-serif";
+        ctx.textAlign = 'left';
+        ctx.fillText('Legend', lx + 10, ly + 15);
 
-      const items = [
-        { color: '#34d399', label: 'Anchor (online)',  tri: true,  py: ly + 34 },
-        { color: '#f87171', label: 'Anchor (offline)', tri: true,  py: ly + 54 },
-        { color: '#22d3ee', label: 'Tracked Beacon',   tri: false, py: ly + 74 },
-      ];
-      items.forEach(({ color, label, tri, py }) => {
-        ctx.fillStyle = color;
-        if (tri) {
-          ctx.beginPath();
-          ctx.moveTo(lx + 17, py - 8); ctx.lineTo(lx + 11, py + 2); ctx.lineTo(lx + 23, py + 2);
-          ctx.closePath(); ctx.fill();
-        } else {
-          ctx.beginPath(); ctx.arc(lx + 17, py - 2, 4, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.fillStyle = 'rgba(156,163,175,0.85)';
-        ctx.font = "10px 'Outfit',sans-serif";
-        ctx.fillText(label, lx + 30, py);
-      });
+        const items = [
+          { color: '#34d399', label: 'Anchor online',  tri: true,  py: ly + 30 },
+          { color: '#f87171', label: 'Anchor offline', tri: true,  py: ly + 48 },
+          { color: '#22d3ee', label: 'Beacon',         tri: false, py: ly + 66 },
+        ];
+        items.forEach(({ color, label, tri, py }) => {
+          ctx.fillStyle = color;
+          if (tri) {
+            ctx.beginPath();
+            ctx.moveTo(lx + 15, py - 7); ctx.lineTo(lx + 10, py + 1); ctx.lineTo(lx + 20, py + 1);
+            ctx.closePath(); ctx.fill();
+          } else {
+            ctx.beginPath(); ctx.arc(lx + 15, py - 2, 4, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.fillStyle = 'rgba(156,163,175,0.85)';
+          ctx.font = "9px 'Outfit',sans-serif";
+          ctx.fillText(label, lx + 27, py);
+        });
+      }
     };
 
     const loop = () => {

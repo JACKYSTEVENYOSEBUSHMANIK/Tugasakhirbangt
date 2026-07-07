@@ -231,6 +231,7 @@ body {
 
 .page-body {
   flex: 1;
+  min-height: 0;
   animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -303,12 +304,15 @@ h2 {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .anchor-header h3 {
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--text-main);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .status-dot {
@@ -335,12 +339,14 @@ h2 {
   padding: 4px 10px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
 }
 
 /* Data Flow */
 .data-flow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 14px 0;
   font-size: 0.75rem;
@@ -356,7 +362,7 @@ h2 {
 
 .flow-icon {
   background: rgba(255, 255, 255, 0.06);
-  padding: 4px 12px;
+  padding: 4px 10px;
   border-radius: 8px;
   font-weight: 600;
   font-size: 0.7rem;
@@ -378,12 +384,16 @@ h2 {
 .flow-label {
   font-size: 0.65rem;
   color: var(--text-muted);
+  max-width: 72px;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .flow-arrow {
   color: var(--success);
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
 }
 
 .flow-arrow.flow-inactive {
@@ -692,18 +702,21 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 0;
 }
 
 .dashboard {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(430px, 1fr) minmax(320px, 340px);
   grid-template-rows: auto;
   gap: 16px;
   align-items: start;
+  min-width: 0;
 }
 
 .dashboard-map {
-  /* No extra styles needed — room-map-wrapper handles sizing */
+  min-width: 0;
+  width: 100%;
 }
 
 .dashboard-panel {
@@ -715,15 +728,22 @@ input:focus, select:focus, textarea:focus {
   min-width: 0;
 }
 
+.dashboard-panel .anchor-panel,
+.dashboard-panel .positions-summary {
+  padding: 22px;
+}
+
 /* ── Room Map Canvas ────────────────────────────────────────────────────── */
 .room-map-wrapper {
   width: 100%;
-  height: clamp(400px, calc(100vh - 200px), 700px);
+  min-height: 400px;
+  height: clamp(400px, calc(100vh - 220px), 700px);
   border-radius: 14px;
   overflow: hidden;
   background: #0a0a0f;
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  position: relative;
 }
 
 .room-map-canvas {
@@ -763,9 +783,22 @@ input:focus, select:focus, textarea:focus {
   }
 }
 
+@media (max-width: 1280px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-panel {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 900px) {
   .dashboard {
     grid-template-columns: 1fr;
+  }
+  .room-map-wrapper {
+    height: 420px;
   }
   .form-grid {
     grid-template-columns: 1fr;
