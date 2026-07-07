@@ -1,9 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { 
+  LayoutDashboard, 
+  Sliders, 
+  Calendar, 
+  Users, 
+  CheckSquare, 
+  Activity, 
+  Map, 
+  Database,
+  Wifi,
+  WifiOff,
+  Cpu
+} from 'lucide-react';
 import RoomMap from './components/RoomMap';
 import AnchorPanel from './components/AnchorPanel';
 import CalibrationForm from './components/CalibrationForm';
 import Terminal from './components/Terminal';
+import ShiftManagement from './components/ShiftManagement';
+import PetugasManagement from './components/PetugasManagement';
+import TaskManagement from './components/TaskManagement';
+import SignalMonitor from './components/SignalMonitor';
+import HeatmapView from './components/HeatmapView';
+import PruningSettings from './components/PruningSettings';
 import {
   getAnchors,
   getPositions,
@@ -50,7 +69,7 @@ interface ScanEntry {
   age_seconds: number;
 }
 
-type Page = 'dashboard' | 'calibration';
+type Page = 'dashboard' | 'calibration' | 'shifts' | 'petugas' | 'tasks' | 'signal_monitor' | 'heatmap' | 'pruning';
 
 const SOCKET_URL = `http://${window.location.hostname}:5000`;
 
@@ -64,7 +83,6 @@ function App() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
 
-  // Fetch data functions
   const fetchAnchors = useCallback(async () => {
     try {
       const data = await getAnchors();
@@ -116,6 +134,8 @@ function App() {
       setHealth(null);
     }
   }, []);
+
+
 
   // Initial data load
   useEffect(() => {
@@ -176,123 +196,236 @@ function App() {
   }, [fetchAnchors, fetchScanData, fetchHealth]);
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>BLE Room Positioning System</h1>
-        <nav className="nav-tabs">
+    <div className="app-container">
+      {/* Left Sidebar */}
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <Cpu className="brand-icon" size={24} />
+          <h2>Room IPS</h2>
+        </div>
+        
+        <nav className="sidebar-nav">
           <button
-            className={`nav-btn ${page === 'dashboard' ? 'active' : ''}`}
+            className={`sidebar-link ${page === 'dashboard' ? 'active' : ''}`}
             onClick={() => setPage('dashboard')}
           >
-            Dashboard
+            <LayoutDashboard size={20} />
+            <span>Dashboard</span>
           </button>
           <button
-            className={`nav-btn ${page === 'calibration' ? 'active' : ''}`}
+            className={`sidebar-link ${page === 'calibration' ? 'active' : ''}`}
             onClick={() => setPage('calibration')}
           >
-            Calibration
+            <Sliders size={20} />
+            <span>Calibration</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'shifts' ? 'active' : ''}`}
+            onClick={() => setPage('shifts')}
+          >
+            <Calendar size={20} />
+            <span>Shift Kerja</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'petugas' ? 'active' : ''}`}
+            onClick={() => setPage('petugas')}
+          >
+            <Users size={20} />
+            <span>Petugas & Beacon</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'tasks' ? 'active' : ''}`}
+            onClick={() => setPage('tasks')}
+          >
+            <CheckSquare size={20} />
+            <span>Penugasan</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'signal_monitor' ? 'active' : ''}`}
+            onClick={() => setPage('signal_monitor')}
+          >
+            <Activity size={20} />
+            <span>Sinyal & Kalibrasi</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'heatmap' ? 'active' : ''}`}
+            onClick={() => setPage('heatmap')}
+          >
+            <Map size={20} />
+            <span>Heatmap Durasi</span>
+          </button>
+          <button
+            className={`sidebar-link ${page === 'pruning' ? 'active' : ''}`}
+            onClick={() => setPage('pruning')}
+          >
+            <Database size={20} />
+            <span>Pembersihan DB</span>
           </button>
         </nav>
-        <div className="header-status">
-          <span className={`conn-indicator ${backendOnline && socketConnected ? 'connected' : 'disconnected'}`}>
-            {!backendOnline ? 'Backend Offline' : socketConnected ? 'Connected' : 'Polling...'}
-          </span>
+
+        <div className="sidebar-footer">
+          <div className="connection-status">
+            {backendOnline && socketConnected ? (
+              <div className="status-item text-online">
+                <Wifi size={16} />
+                <span>Connected</span>
+              </div>
+            ) : (
+              <div className="status-item text-offline">
+                <WifiOff size={16} />
+                <span>{!backendOnline ? 'Offline' : 'Polling...'}</span>
+              </div>
+            )}
+          </div>
           {health && (
-            <span className="health-info">
-              {health.anchors_reporting}/{health.anchors_total} anchors | {health.beacons_tracked} beacons
-            </span>
+            <div className="health-summary">
+              <div>{health.anchors_reporting}/{health.anchors_total} Anchors</div>
+              <div>{health.beacons_tracked} Beacons</div>
+            </div>
           )}
         </div>
-      </header>
+      </aside>
 
-      {/* System status banners */}
-      {!backendOnline && (
-        <div className="status-banner banner-error">
-          Backend server is not reachable. Make sure it's running on port 5000.
-        </div>
-      )}
-      {backendOnline && health && !health.system_ready && (
-        <div className="status-banner banner-warning">
-          Waiting for anchors: {health.anchors_reporting}/3 online. Positions will appear once all 3 anchors are reporting data.
-        </div>
-      )}
-      {backendOnline && health && health.system_ready && positions.length === 0 && (
-        <div className="status-banner banner-info">
-          All anchors connected. Waiting for BLE beacon detections...
-        </div>
-      )}
+      {/* Main Content Area */}
+      <div className="main-content">
+        <header className="content-header">
+          <h1>
+            {page === 'dashboard' && 'Dashboard Overview'}
+            {page === 'calibration' && 'Signal & Room Calibration'}
+            {page === 'shifts' && 'Shift Kerja Management'}
+            {page === 'petugas' && 'Petugas & Beacon Management'}
+            {page === 'tasks' && 'Penugasan & Task Tracking'}
+            {page === 'signal_monitor' && 'Real-Time Signal Monitor'}
+            {page === 'heatmap' && 'Duration Heatmap Analysis'}
+            {page === 'pruning' && 'Database Pruning Settings'}
+          </h1>
+        </header>
 
-      <main className="app-main">
-        {page === 'dashboard' && (
-          <div className="dashboard-page">
-            <div className="dashboard">
-              <div className="dashboard-map">
-                <RoomMap
-                  anchors={anchors}
-                  positions={health?.system_ready ? positions : []}
-                  roomWidth={roomDims.width}
-                  roomHeight={roomDims.height}
-                />
-              </div>
-              <div className="dashboard-panel">
-                <AnchorPanel anchors={anchors} scanData={scanData} />
+        {/* System status banners */}
+        {!backendOnline && (
+          <div className="status-banner banner-error">
+            Backend server is not reachable. Make sure it's running on port 5000.
+          </div>
+        )}
+        {backendOnline && health && !health.system_ready && (
+          <div className="status-banner banner-warning">
+            Waiting for anchors: {health.anchors_reporting}/3 online. Positions will appear once all 3 anchors are reporting data.
+          </div>
+        )}
+        {backendOnline && health && health.system_ready && positions.length === 0 && (
+          <div className="status-banner banner-info">
+            All anchors connected. Waiting for BLE beacon detections...
+          </div>
+        )}
 
-                {health?.system_ready && positions.length > 0 && (
-                  <div className="positions-summary">
-                    <h2>Tracked Beacons</h2>
-                    <table className="positions-table">
-                      <thead>
-                        <tr>
-                          <th>Beacon</th>
-                          <th>Position (x, y)</th>
-                          <th>Error</th>
-                          <th>Anchors</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {positions.map((pos) => (
-                          <tr key={pos.beacon_id}>
-                            <td title={pos.beacon_id}>
-                              {pos.beacon_id.slice(-8)}
-                            </td>
-                            <td>
-                              {pos.position
-                                ? `(${pos.position[0]}, ${pos.position[1]})`
-                                : 'N/A'}
-                            </td>
-                            <td>
-                              {pos.error !== null
-                                ? `${pos.error.toFixed(2)} m`
-                                : 'N/A'}
-                            </td>
-                            <td>{pos.anchors_used}</td>
+        <main className="page-body">
+          {page === 'dashboard' && (
+            <div className="dashboard-page">
+              <div className="dashboard">
+                <div className="dashboard-map">
+                  <RoomMap
+                    anchors={anchors}
+                    positions={health?.system_ready ? positions : []}
+                    roomWidth={roomDims.width}
+                    roomHeight={roomDims.height}
+                  />
+                </div>
+                <div className="dashboard-panel">
+                  <AnchorPanel anchors={anchors} scanData={scanData} />
+
+                  {health?.system_ready && positions.length > 0 && (
+                    <div className="positions-summary">
+                      <h2>Tracked Beacons</h2>
+                      <table className="positions-table">
+                        <thead>
+                          <tr>
+                            <th>Beacon</th>
+                            <th>Position (x, y)</th>
+                            <th>Error</th>
+                            <th>Anchors</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {positions.map((pos) => (
+                            <tr key={pos.beacon_id}>
+                              <td title={pos.beacon_id}>
+                                {pos.beacon_id.slice(-8)}
+                              </td>
+                              <td>
+                                {pos.position
+                                  ? `(${pos.position[0]}, ${pos.position[1]})`
+                                  : 'N/A'}
+                              </td>
+                              <td>
+                                {pos.error !== null
+                                  ? `${pos.error.toFixed(2)} m`
+                                  : 'N/A'}
+                              </td>
+                              <td>{pos.anchors_used}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              <section className="positioning-log" aria-label="ESP positioning data log">
+                <Terminal />
+              </section>
             </div>
+          )}
 
-            <section className="positioning-log" aria-label="ESP positioning data log">
-              <Terminal />
-            </section>
-          </div>
-        )}
+          {page === 'calibration' && (
+            <div className="calibration-page">
+              <CalibrationForm
+                anchors={anchors}
+                onAnchorsUpdated={() => {
+                  fetchAnchors();
+                  fetchConfig();
+                }}
+              />
+            </div>
+          )}
 
-        {page === 'calibration' && (
-          <div className="calibration-page">
-            <CalibrationForm
-              anchors={anchors}
-              onAnchorsUpdated={() => {
-                fetchAnchors();
-                fetchConfig();
-              }}
-            />
-          </div>
-        )}
-      </main>
+          {page === 'shifts' && (
+            <div className="shifts-page">
+              <ShiftManagement />
+            </div>
+          )}
+
+          {page === 'petugas' && (
+            <div className="petugas-page">
+              <PetugasManagement />
+            </div>
+          )}
+
+          {page === 'tasks' && (
+            <div className="tasks-page">
+              <TaskManagement />
+            </div>
+          )}
+
+          {page === 'signal_monitor' && (
+            <div className="signal-monitor-page">
+              <SignalMonitor anchors={anchors} />
+            </div>
+          )}
+
+          {page === 'heatmap' && (
+            <div className="heatmap-page">
+              <HeatmapView roomWidth={roomDims.width} roomHeight={roomDims.height} />
+            </div>
+          )}
+
+          {page === 'pruning' && (
+            <div className="pruning-page">
+              <PruningSettings />
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

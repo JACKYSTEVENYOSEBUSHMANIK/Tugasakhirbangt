@@ -22,205 +22,256 @@ interface RoomMapProps {
   roomHeight: number;
 }
 
-const PADDING = 60;
-const SCALE_FACTOR = 50; // pixels per meter
+const PAD = 52;
 
 function RoomMap({ anchors, positions, roomWidth, roomHeight }: RoomMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number>(0);
 
-  const canvasWidth = roomWidth * SCALE_FACTOR + PADDING * 2;
-  const canvasHeight = roomHeight * SCALE_FACTOR + PADDING * 2;
-
-  // Convert world coordinates (meters) to canvas coordinates (pixels)
-  const worldToCanvas = (x: number, y: number): [number, number] => {
-    return [
-      PADDING + x * SCALE_FACTOR,
-      canvasHeight - PADDING - y * SCALE_FACTOR, // Flip Y axis
-    ];
-  };
+  // Store latest props in a ref so the animation loop sees them without deps
+  const propsRef = useRef({ anchors, positions, roomWidth, roomHeight });
+  propsRef.current = { anchors, positions, roomWidth, roomHeight };
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let cssW = 0;
+    let cssH = 0;
+    let resizePending = false;
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    const applyResize = (w: number, h: number) => {
+      if (w === 0 || h === 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      cssW = w;
+      cssH = h;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+    };
 
-    // Draw room background
-    const [roomX, roomY] = worldToCanvas(0, roomHeight);
-    const [roomX2, roomY2] = worldToCanvas(roomWidth, 0);
-    
-    ctx.fillStyle = '#f8f9fa';
-    ctx.fillRect(roomX, roomY, roomX2 - roomX, roomY2 - roomY);
-    
-    // Draw grid
-    ctx.strokeStyle = '#e9ecef';
-    ctx.lineWidth = 1;
-    
-    for (let x = 0; x <= roomWidth; x++) {
-      const [cx, cy1] = worldToCanvas(x, 0);
-      const [, cy2] = worldToCanvas(x, roomHeight);
-      ctx.beginPath();
-      ctx.moveTo(cx, cy1);
-      ctx.lineTo(cx, cy2);
-      ctx.stroke();
-    }
-    
-    for (let y = 0; y <= roomHeight; y++) {
-      const [cx1, cy] = worldToCanvas(0, y);
-      const [cx2] = worldToCanvas(roomWidth, y);
-      ctx.beginPath();
-      ctx.moveTo(cx1, cy);
-      ctx.lineTo(cx2, cy);
-      ctx.stroke();
-    }
-
-    // Draw room border
-    ctx.strokeStyle = '#495057';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(roomX, roomY, roomX2 - roomX, roomY2 - roomY);
-
-    // Draw scale indicators
-    ctx.fillStyle = '#6c757d';
-    ctx.font = '11px monospace';
-    ctx.textAlign = 'center';
-    for (let x = 0; x <= roomWidth; x += 2) {
-      const [cx, cy] = worldToCanvas(x, 0);
-      ctx.fillText(`${x}m`, cx, cy + 20);
-    }
-    ctx.textAlign = 'right';
-    for (let y = 0; y <= roomHeight; y += 2) {
-      const [cx, cy] = worldToCanvas(0, y);
-      ctx.fillText(`${y}m`, cx - 10, cy + 4);
-    }
-
-    // Draw anchors as triangles
-    anchors.forEach((anchor) => {
-      const [cx, cy] = worldToCanvas(anchor.x, anchor.y);
-      
-      ctx.fillStyle = anchor.online ? '#28a745' : '#dc3545';
-      ctx.strokeStyle = anchor.online ? '#155724' : '#721c24';
-      ctx.lineWidth = 2;
-
-      // Draw triangle
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 15);
-      ctx.lineTo(cx - 12, cy + 10);
-      ctx.lineTo(cx + 12, cy + 10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Draw label
-      ctx.fillStyle = '#212529';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(anchor.label || anchor.anchor_id, cx, cy + 28);
-      
-      // Draw coordinates
-      ctx.fillStyle = '#6c757d';
-      ctx.font = '10px monospace';
-      ctx.fillText(`(${anchor.x}, ${anchor.y})`, cx, cy + 42);
+    const ro = new ResizeObserver((entries) => {
+      if (resizePending) return;
+      resizePending = true;
+      // Schedule outside the current observation to avoid the loop error
+      requestAnimationFrame(() => {
+        resizePending = false;
+        for (const entry of entries) {
+          const bs = entry.borderBoxSize?.[0];
+          if (bs) {
+            applyResize(bs.inlineSize, bs.blockSize);
+          } else {
+            const rect = wrapper.getBoundingClientRect();
+            applyResize(rect.width, rect.height);
+          }
+        }
+      });
     });
+    ro.observe(wrapper);
 
-    // Draw beacon positions
-    positions.forEach((pos) => {
-      if (!pos.position) return;
+    // Initial size
+    const rect = wrapper.getBoundingClientRect();
+    applyResize(rect.width, rect.height);
 
-      const [cx, cy] = worldToCanvas(pos.position[0], pos.position[1]);
 
-      // Draw position uncertainty circle
-      if (pos.error !== null) {
-        const radius = Math.max(5, pos.error * SCALE_FACTOR);
-        ctx.fillStyle = 'rgba(0, 123, 255, 0.15)';
-        ctx.strokeStyle = 'rgba(0, 123, 255, 0.4)';
-        ctx.lineWidth = 1;
+    const draw = () => {
+      if (cssW === 0 || cssH === 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const { anchors, positions, roomWidth, roomHeight } = propsRef.current;
+
+      // Scale context so all draw calls use CSS pixels
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const innerW = cssW - PAD * 2;
+      const innerH = cssH - PAD * 2;
+      const scale = Math.min(innerW / roomWidth, innerH / roomHeight);
+      const roomPxW = roomWidth * scale;
+      const roomPxH = roomHeight * scale;
+      const ox = PAD + (innerW - roomPxW) / 2; // left edge of room
+      const oy = PAD + (innerH - roomPxH) / 2; // top edge of room
+
+      const toX = (mx: number) => ox + mx * scale;
+      const toY = (my: number) => oy + (roomHeight - my) * scale; // Y-flip
+
+      // ── Background ────────────────────────────────────────────────────────
+      ctx.fillStyle = '#0a0a0f';
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      // Room fill
+      ctx.fillStyle = 'rgba(255,255,255,0.015)';
+      ctx.fillRect(ox, oy, roomPxW, roomPxH);
+
+      // ── Grid ──────────────────────────────────────────────────────────────
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.lineWidth = 1;
+      for (let mx = 0; mx <= roomWidth; mx++) {
+        ctx.beginPath(); ctx.moveTo(toX(mx), oy); ctx.lineTo(toX(mx), oy + roomPxH); ctx.stroke();
+      }
+      for (let my = 0; my <= roomHeight; my++) {
+        ctx.beginPath(); ctx.moveTo(ox, toY(my)); ctx.lineTo(ox + roomPxW, toY(my)); ctx.stroke();
+      }
+
+      // ── Room border ───────────────────────────────────────────────────────
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'rgba(167,139,250,0.5)';
+      ctx.strokeStyle = 'rgba(167,139,250,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ox, oy, roomPxW, roomPxH);
+      ctx.shadowBlur = 0;
+
+      // ── Axis labels ───────────────────────────────────────────────────────
+      ctx.fillStyle = 'rgba(156,163,175,0.5)';
+      ctx.font = "10px 'Fira Code',monospace";
+      ctx.textAlign = 'center';
+      const xStep = roomWidth <= 10 ? 2 : roomWidth <= 20 ? 4 : 5;
+      const yStep = roomHeight <= 10 ? 2 : roomHeight <= 20 ? 4 : 5;
+      for (let mx = 0; mx <= roomWidth; mx += xStep) {
+        ctx.fillText(`${mx}m`, toX(mx), oy + roomPxH + 18);
+      }
+      ctx.textAlign = 'right';
+      for (let my = 0; my <= roomHeight; my += yStep) {
+        ctx.fillText(`${my}m`, ox - 8, toY(my) + 4);
+      }
+
+      const t = Date.now() * 0.003;
+
+      // ── Anchors ───────────────────────────────────────────────────────────
+      anchors.forEach((a) => {
+        const cx = toX(a.x);
+        const cy = toY(a.y);
+        const color = a.online ? '#34d399' : '#f87171';
+        const pulse = a.online ? Math.sin(t) * 3 : 0;
+
+        // Halo
+        ctx.fillStyle = a.online ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.1)';
+        ctx.beginPath(); ctx.arc(cx, cy, 14 + pulse, 0, Math.PI * 2); ctx.fill();
+
+        // Triangle
+        ctx.shadowBlur = a.online ? 8 : 0;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#0a0a0f';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
+        ctx.moveTo(cx, cy - 9);
+        ctx.lineTo(cx - 8, cy + 6);
+        ctx.lineTo(cx + 8, cy + 6);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
 
-      // Draw beacon dot
-      ctx.fillStyle = '#007bff';
-      ctx.strokeStyle = '#0056b3';
-      ctx.lineWidth = 2;
+        // Label
+        ctx.fillStyle = '#e5e7eb';
+        ctx.font = "bold 11px 'Outfit',sans-serif";
+        ctx.textAlign = 'center';
+        ctx.fillText(a.label || a.anchor_id, cx, cy + 22);
+        ctx.fillStyle = 'rgba(156,163,175,0.55)';
+        ctx.font = "9px 'Fira Code',monospace";
+        ctx.fillText(`(${a.x}, ${a.y})`, cx, cy + 33);
+      });
+
+      // ── Beacons ───────────────────────────────────────────────────────────
+      positions.forEach((pos) => {
+        if (!pos.position) return;
+        const cx = toX(pos.position[0]);
+        const cy = toY(pos.position[1]);
+        const pulse = Math.sin(t * 1.5) * 2;
+
+        if (pos.error !== null) {
+          const errPx = Math.max(10, pos.error * scale);
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = 'rgba(34,211,238,0.2)';
+          ctx.fillStyle = 'rgba(34,211,238,0.04)';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(cx, cy, errPx, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        ctx.fillStyle = 'rgba(34,211,238,0.1)';
+        ctx.beginPath(); ctx.arc(cx, cy, 14 + pulse, 0, Math.PI * 2); ctx.fill();
+
+        ctx.strokeStyle = 'rgba(34,211,238,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, 7 + pulse * 0.4, 0, Math.PI * 2); ctx.stroke();
+
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = '#22d3ee';
+        ctx.fillStyle = '#22d3ee';
+        ctx.strokeStyle = '#0a0a0f';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#f8f9fa';
+        ctx.font = "bold 10px 'Fira Code',monospace";
+        ctx.textAlign = 'center';
+        ctx.fillText(pos.beacon_id.slice(-8), cx, cy - 17);
+        if (pos.error !== null) {
+          ctx.fillStyle = 'rgba(156,163,175,0.7)';
+          ctx.font = "9px 'Outfit',sans-serif";
+          ctx.fillText(`±${pos.error.toFixed(2)}m`, cx, cy + 22);
+        }
+      });
+
+      // ── Legend ────────────────────────────────────────────────────────────
+      const lx = cssW - 155;
+      const ly = 12;
+      ctx.fillStyle = 'rgba(13,13,20,0.88)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      if (ctx.roundRect) ctx.roundRect(lx, ly, 145, 88, 8);
+      else ctx.rect(lx, ly, 145, 88);
+      ctx.fill(); ctx.stroke();
 
-      // Draw beacon ID (shortened MAC)
-      const shortId = pos.beacon_id.slice(-8);
-      ctx.fillStyle = '#212529';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(shortId, cx, cy - 14);
+      ctx.fillStyle = '#e5e7eb';
+      ctx.font = "bold 11px 'Outfit',sans-serif";
+      ctx.textAlign = 'left';
+      ctx.fillText('Legend', lx + 12, ly + 17);
 
-      // Draw error value
-      if (pos.error !== null) {
-        ctx.fillStyle = '#6c757d';
-        ctx.fillText(`err: ${pos.error.toFixed(2)}m`, cx, cy + 24);
-      }
-    });
+      const items = [
+        { color: '#34d399', label: 'Anchor (online)',  tri: true,  py: ly + 34 },
+        { color: '#f87171', label: 'Anchor (offline)', tri: true,  py: ly + 54 },
+        { color: '#22d3ee', label: 'Tracked Beacon',   tri: false, py: ly + 74 },
+      ];
+      items.forEach(({ color, label, tri, py }) => {
+        ctx.fillStyle = color;
+        if (tri) {
+          ctx.beginPath();
+          ctx.moveTo(lx + 17, py - 8); ctx.lineTo(lx + 11, py + 2); ctx.lineTo(lx + 23, py + 2);
+          ctx.closePath(); ctx.fill();
+        } else {
+          ctx.beginPath(); ctx.arc(lx + 17, py - 2, 4, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(156,163,175,0.85)';
+        ctx.font = "10px 'Outfit',sans-serif";
+        ctx.fillText(label, lx + 30, py);
+      });
+    };
 
-    // Draw legend
-    const legendX = canvasWidth - 150;
-    const legendY = 20;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.fillRect(legendX, legendY, 140, 80);
-    ctx.strokeStyle = '#dee2e6';
-    ctx.strokeRect(legendX, legendY, 140, 80);
+    const loop = () => {
+      draw();
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
 
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillStyle = '#212529';
-    ctx.textAlign = 'left';
-    ctx.fillText('Legend', legendX + 10, legendY + 16);
-
-    // Anchor online
-    ctx.fillStyle = '#28a745';
-    ctx.beginPath();
-    ctx.moveTo(legendX + 16, legendY + 30);
-    ctx.lineTo(legendX + 10, legendY + 40);
-    ctx.lineTo(legendX + 22, legendY + 40);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#212529';
-    ctx.font = '10px sans-serif';
-    ctx.fillText('Anchor (online)', legendX + 28, legendY + 38);
-
-    // Beacon
-    ctx.fillStyle = '#007bff';
-    ctx.beginPath();
-    ctx.arc(legendX + 16, legendY + 55, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#212529';
-    ctx.fillText('Beacon', legendX + 28, legendY + 58);
-
-    // Anchor offline
-    ctx.fillStyle = '#dc3545';
-    ctx.beginPath();
-    ctx.moveTo(legendX + 16, legendY + 66);
-    ctx.lineTo(legendX + 10, legendY + 76);
-    ctx.lineTo(legendX + 22, legendY + 76);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#212529';
-    ctx.fillText('Anchor (offline)', legendX + 28, legendY + 74);
-
-  }, [anchors, positions, roomWidth, roomHeight, canvasWidth, canvasHeight]);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+    };
+  }, []); // only mount/unmount — props are read via ref
 
   return (
-    <div className="room-map">
-      <canvas
-        ref={canvasRef}
-        width={canvasWidth}
-        height={canvasHeight}
-        style={{ border: '1px solid #dee2e6', borderRadius: '8px' }}
-      />
+    <div ref={wrapperRef} className="room-map-wrapper">
+      <canvas ref={canvasRef} className="room-map-canvas" />
     </div>
   );
 }

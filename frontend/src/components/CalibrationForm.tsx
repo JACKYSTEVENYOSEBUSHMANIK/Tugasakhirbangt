@@ -45,12 +45,21 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
     // Fetch current calibration params
     const fetchCalib = async () => {
       try {
-        const data: CalibrationData = await getCalibration();
-        setCalibParams(data.calibration);
-        if (data.room) {
+        const data = await getCalibration();
+        if (data && typeof data === 'object' && data.calibration) {
+          setCalibParams({
+            path_loss_exponent: data.calibration.path_loss_exponent ?? 2.0,
+            tx_power_dbm: data.calibration.tx_power_dbm ?? -59,
+            min_rssi_threshold: data.calibration.min_rssi_threshold ?? -90,
+            scan_ttl_seconds: data.calibration.scan_ttl_seconds ?? 15,
+          });
+        } else {
+          console.error('Invalid calibration data format received:', data);
+        }
+        if (data && typeof data === 'object' && data.room) {
           setRoomDimensions({
-            width: data.room.width_m,
-            height: data.room.height_m,
+            width: data.room.width_m ?? 10,
+            height: data.room.height_m ?? 8,
           });
         }
       } catch (err) {

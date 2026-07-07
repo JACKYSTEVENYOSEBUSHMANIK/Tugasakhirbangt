@@ -37,9 +37,22 @@ DEFAULT_CONFIG = {
         "min_rssi_threshold": -90,    # Ignore signals weaker than this
         "scan_ttl_seconds": 15,      # How long scan data is considered fresh
     },
+    "zones": {
+        "Ruang VIP": {"x_min": 0.0, "x_max": 5.0, "y_min": 0.0, "y_max": 4.0},
+        "Pantry": {"x_min": 5.0, "x_max": 10.0, "y_min": 0.0, "y_max": 4.0},
+        "Lobi": {"x_min": 0.0, "x_max": 10.0, "y_min": 4.0, "y_max": 8.0}
+    },
     "beacon_filters": [],  # List of beacon MAC addresses to track (empty = track all)
 }
 
+def get_ruangan_for_position(x, y, config=None):
+    if config is None:
+        config = load_config()
+    zones = config.get("zones", DEFAULT_CONFIG["zones"])
+    for name, bbox in zones.items():
+        if bbox["x_min"] <= x <= bbox["x_max"] and bbox["y_min"] <= y <= bbox["y_max"]:
+            return name
+    return "Unknown"
 
 def load_config():
     """Load configuration from JSON file, or create default."""

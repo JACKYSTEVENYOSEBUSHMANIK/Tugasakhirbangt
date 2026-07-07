@@ -152,7 +152,7 @@ def trilaterate(anchor_distances, anchor_positions):
         }
 
 
-def calculate_position(beacon_id, scan_data_by_anchor, anchor_positions, calibration):
+def calculate_position(beacon_id, scan_data_by_anchor, anchor_positions, calibration, anchor_calibrations=None):
     """
     Full pipeline: take raw scan data from multiple anchors and calculate beacon position.
 
@@ -162,11 +162,15 @@ def calculate_position(beacon_id, scan_data_by_anchor, anchor_positions, calibra
             Each reading: {"beacon_id": "...", "rssi": -65, "tx_power": -59}
         anchor_positions: Dict of anchor_id -> (x, y)
         calibration: Dict with path_loss_exponent, tx_power_dbm, min_rssi_threshold
+        anchor_calibrations: Dict of anchor_id -> {"p_tx": ..., "faktor_n": ...}
 
     Returns:
         dict with position, error, details per anchor
     """
-    path_loss_exp = calibration.get("path_loss_exponent", 2.0)
+    if anchor_calibrations is None:
+        anchor_calibrations = {}
+
+    path_loss_exp_default = calibration.get("path_loss_exponent", 2.0)
     default_tx = calibration.get("tx_power_dbm", -59)
     min_rssi = calibration.get("min_rssi_threshold", -90)
 
@@ -190,10 +194,10 @@ def calculate_position(beacon_id, scan_data_by_anchor, anchor_positions, calibra
         if rssi < min_rssi:
             continue
 
-        # Use beacon-specific TX power if available, else default
-        tx_power = target.get("tx_power", default_tx)
-        if not isinstance(tx_power, (int, float)) or not -100 <= tx_power <= -20:
-            tx_power = default_tx
+        # Get anchor specific calibration parameters
+        anchor_cal = anchor_calibrations.get(anchor_id, {})
+        tx_power = anchor_cal.get("p_tx", default_tx)
+        path_loss_exp = anchor_cal.get("faktor_n", path_loss_exp_default)
 
         # Convert RSSI to distance
         distance = rssi_to_distance(rssi, tx_power, path_loss_exp)
