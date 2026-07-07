@@ -1,4 +1,46 @@
-backend/.venv/
-.server/
-
+# Environment secrets (DO NOT COMMIT)
 .env
+.env.local
+.env.*.local
+*.env
+
+# Runtime / Temp directories
+.server/
+.qoder/
+backend/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+
+# Dependency directories
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+
+# Log files
+*.log
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS metadata
+.DS_Store
+Thumbs.db

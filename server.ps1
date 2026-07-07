@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'status')]
-    [string]$Action = 'status'
+    [ValidateSet('start', 'stop', 'restart', 'status', 'menu')]
+    [string]$Action = 'menu'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -151,7 +151,56 @@ function Ensure-BackendVenv {
     }
 }
 
+function Ensure-FirewallRules {
+    try {
+        Write-Host "Checking firewall rules for local network access..."
+        
+        $rule5000 = Get-NetFirewallRule -DisplayName "Allow Port 5000 Inbound (BLE Positioning)" -ErrorAction SilentlyContinue
+        $rule3000 = Get-NetFirewallRule -DisplayName "Allow Port 3000 Inbound (BLE Positioning)" -ErrorAction SilentlyContinue
+        
+        if (-not $rule5000 -or -not $rule3000) {
+            Write-Host "Inbound firewall rules for ports 5000 or 3000 are missing."
+            
+            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            
+            if ($isAdmin) {
+                Write-Host "Creating firewall rules..."
+                if (-not $rule5000) {
+                    New-NetFirewallRule -DisplayName "Allow Port 5000 Inbound (BLE Positioning)" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow | Out-Null
+                }
+                if (-not $rule3000) {
+                    New-NetFirewallRule -DisplayName "Allow Port 3000 Inbound (BLE Positioning)" -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow | Out-Null
+                }
+                Write-Host "Firewall rules created successfully." -ForegroundColor Green
+            } else {
+                Write-Host "Administrator privileges are required to create firewall rules."
+                Write-Host "Attempting to create rules via UAC elevation..."
+                
+                $cmd = ""
+                if (-not $rule5000) {
+                    $cmd += "New-NetFirewallRule -DisplayName 'Allow Port 5000 Inbound (BLE Positioning)' -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow;"
+                }
+                if (-not $rule3000) {
+                    $cmd += "New-NetFirewallRule -DisplayName 'Allow Port 3000 Inbound (BLE Positioning)' -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow;"
+                }
+                
+                Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"" -Verb RunAs -Wait -ErrorAction Stop
+                Write-Host "Firewall rules created successfully." -ForegroundColor Green
+            }
+        } else {
+            Write-Host "Firewall rules are already configured." -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Warning "Could not verify/create firewall rules automatically: $_"
+        Write-Warning "To enable network access manually, run PowerShell as Administrator and execute:"
+        Write-Warning "  New-NetFirewallRule -DisplayName 'Allow Port 5000 Inbound (BLE Positioning)' -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow"
+        Write-Warning "  New-NetFirewallRule -DisplayName 'Allow Port 3000 Inbound (BLE Positioning)' -Direction Inbound -LocalPort 3000 -Protocol TCP -Action Allow"
+    }
+}
+
 function Start-Servers {
+    Ensure-FirewallRules
     Ensure-RuntimeDirectory
 
     if ((Get-SavedProcess -PidFile $BackendPidFile) -or (Test-Port -Port 5000)) {
@@ -256,6 +305,85 @@ function Show-Status {
     Write-Host "Frontend: $frontendState"
 }
 
+function Show-InteractiveMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host " BLE Room Positioning System - Service Menu  " -ForegroundColor Cyan -NoNewline
+        $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if ($isAdmin) {
+            Write-Host " (Admin Mode)" -ForegroundColor Red
+        } else {
+            Write-Host ""
+        }
+        Write-Host "=============================================" -ForegroundColor Cyan
+        
+        # Display current status inline
+        $backendProcess = Get-SavedProcess -PidFile $BackendPidFile
+        $frontendProcess = Get-SavedProcess -PidFile $FrontendPidFile
+        $backendListening = Test-Port -Port 5000
+        $frontendListening = Test-Port -Port 3000
+
+        $backendStatus = if ($backendProcess -and $backendListening) { "RUNNING (PID $($backendProcess.Id))" } elseif ($backendListening) { "RUNNING (unmanaged)" } else { "STOPPED" }
+        $frontendStatus = if ($frontendProcess -and $frontendListening) { "RUNNING (PID $($frontendProcess.Id))" } elseif ($frontendListening) { "RUNNING (unmanaged)" } else { "STOPPED" }
+
+        Write-Host "Current Status:"
+        Write-Host "  Backend : " -NoNewline
+        if ($backendStatus -eq "STOPPED") { Write-Host $backendStatus -ForegroundColor Red } else { Write-Host $backendStatus -ForegroundColor Green }
+        Write-Host "  Frontend: " -NoNewline
+        if ($frontendStatus -eq "STOPPED") { Write-Host $frontendStatus -ForegroundColor Red } else { Write-Host $frontendStatus -ForegroundColor Green }
+        Write-Host "---------------------------------------------"
+        
+        Write-Host "1) Start Servers"
+        Write-Host "2) Stop Servers"
+        Write-Host "3) Restart Servers"
+        Write-Host "4) Refresh Status"
+        Write-Host "5) Exit"
+        Write-Host ""
+        
+        $choice = Read-Host "Choose an option (1-5)"
+        
+        switch ($choice) {
+            '1' {
+                try {
+                    Start-Servers
+                } catch {
+                    Write-Host "Error: $_" -ForegroundColor Red
+                }
+                Read-Host "`nPress Enter to return to menu..."
+            }
+            '2' {
+                try {
+                    Stop-Servers
+                    Write-Host "`nServers stopped." -ForegroundColor Green
+                } catch {
+                    Write-Host "Error: $_" -ForegroundColor Red
+                }
+                Read-Host "`nPress Enter to return to menu..."
+            }
+            '3' {
+                try {
+                    Stop-Servers
+                    Start-Servers
+                } catch {
+                    Write-Host "Error: $_" -ForegroundColor Red
+                }
+                Read-Host "`nPress Enter to return to menu..."
+            }
+            '4' {
+                # Just loop back
+            }
+            '5' {
+                return
+            }
+            default {
+                Write-Host "Invalid choice, please select 1-5." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+}
+
 switch ($Action) {
     'start' {
         Start-Servers
@@ -272,4 +400,9 @@ switch ($Action) {
         Ensure-RuntimeDirectory
         Show-Status
     }
+    'menu' {
+        Ensure-RuntimeDirectory
+        Show-InteractiveMenu
+    }
 }
+
