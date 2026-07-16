@@ -36,6 +36,8 @@ DEFAULT_CONFIG = {
         "tx_power_dbm": -59,         # Reference TX power at 1 meter (tune per beacon)
         "min_rssi_threshold": -90,    # Ignore signals weaker than this
         "scan_ttl_seconds": 15,      # How long scan data is considered fresh
+        "heatmap_stationary_radius_m": 0.5,  # Max movement between samples to count as "dwelling"
+        "heatmap_max_gap_seconds": 300,      # Max gap between samples before treating as offline
     },
     "zones": {
         "Ruang VIP": {"x_min": 0.0, "x_max": 5.0, "y_min": 0.0, "y_max": 4.0},
@@ -44,15 +46,6 @@ DEFAULT_CONFIG = {
     },
     "beacon_filters": [],  # List of beacon MAC addresses to track (empty = track all)
 }
-
-def get_ruangan_for_position(x, y, config=None):
-    if config is None:
-        config = load_config()
-    zones = config.get("zones", DEFAULT_CONFIG["zones"])
-    for name, bbox in zones.items():
-        if bbox["x_min"] <= x <= bbox["x_max"] and bbox["y_min"] <= y <= bbox["y_max"]:
-            return name
-    return "Unknown"
 
 def load_config():
     """Load configuration from JSON file, or create default."""
@@ -105,3 +98,53 @@ def update_calibration_params(params, config=None):
         config = load_config()
     config["calibration"].update(params)
     save_config(config)
+
+
+def update_room_dimensions(width_m, height_m, config=None):
+    """Update the overall room's dimensions."""
+    if config is None:
+        config = load_config()
+    config["room"]["width_m"] = round(float(width_m), 1)
+    config["room"]["height_m"] = round(float(height_m), 1)
+    save_config(config)
+    return config["room"]
+
+
+def list_zones(config=None):
+    """Return zones as a list of {name, x_min, x_max, y_min, y_max}."""
+    if config is None:
+        config = load_config()
+    zones = config.get("zones", {})
+    return [{"name": name, **bbox} for name, bbox in zones.items()]
+
+
+def add_or_update_zone(name, x_min, x_max, y_min, y_max, config=None):
+    """Create a new zone or overwrite an existing one by name."""
+    if config is None:
+        config = load_config()
+    name = name.strip()
+    if not name:
+        raise ValueError("Zone name is required")
+    x_min, x_max = round(float(x_min), 1), round(float(x_max), 1)
+    y_min, y_max = round(float(y_min), 1), round(float(y_max), 1)
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    config.setdefault("zones", {})[name] = {
+        "x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max,
+    }
+    save_config(config)
+    return {"name": name, "x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max}
+
+
+def delete_zone(name, config=None):
+    """Remove a zone by name. Returns True if it existed."""
+    if config is None:
+        config = load_config()
+    zones = config.get("zones", {})
+    if name in zones:
+        del zones[name]
+        save_config(config)
+        return True
+    return False

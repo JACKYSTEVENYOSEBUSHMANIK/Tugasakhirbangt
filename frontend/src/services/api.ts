@@ -62,67 +62,53 @@ export const getFullConfig = async () => {
   return response.data;
 };
 
+// Update room dimensions
+export const updateRoom = async (dims: { width_m: number; height_m: number }) => {
+  const response = await api.put('/room', dims);
+  return response.data;
+};
+
+// Zones (ruangan) API
+export const getZones = async () => {
+  const response = await api.get('/zones');
+  return response.data;
+};
+
+export const createZone = async (zone: { name: string; x_min: number; x_max: number; y_min: number; y_max: number }) => {
+  const response = await api.post('/zones', zone);
+  return response.data;
+};
+
+export const deleteZone = async (name: string) => {
+  const response = await api.delete(`/zones/${encodeURIComponent(name)}`);
+  return response.data;
+};
+
 // Get recent event logs
 export const getLogs = async (limit = 100) => {
   const response = await api.get(`/logs?limit=${limit}`);
   return response.data;
 };
 
-// Shift Kerja API
-export const getShifts = async () => {
-  const response = await api.get('/shifts');
+// Device (Beacon) API
+export const getDevices = async () => {
+  const response = await api.get('/devices');
   return response.data;
 };
 
-export const createShift = async (shift: { nama_shift: string; jam_mulai: string; jam_selesai: string }) => {
-  const response = await api.post('/shifts', shift);
+export const createDevice = async (device: { beacon_id: string; name?: string }) => {
+  const response = await api.post('/devices', device);
   return response.data;
 };
 
-export const updateShift = async (shift: { id_shift: number; nama_shift: string; jam_mulai: string; jam_selesai: string }) => {
-  const response = await api.put('/shifts', shift);
+export const deleteDevice = async (beaconId: string) => {
+  const response = await api.delete(`/devices/${encodeURIComponent(beaconId)}`);
   return response.data;
 };
 
-export const deleteShift = async (id: number) => {
-  const response = await api.delete(`/shifts/${id}`);
-  return response.data;
-};
-
-// Petugas API
-export const getPetugasList = async () => {
-  const response = await api.get('/petugas');
-  return response.data;
-};
-
-export const createPetugas = async (petugas: { nama: string; beacon_id: string | null; id_shift: number | null }) => {
-  const response = await api.post('/petugas', petugas);
-  return response.data;
-};
-
-export const updatePetugas = async (petugas: { id_petugas: number; nama: string; beacon_id: string | null; id_shift: number | null }) => {
-  const response = await api.put('/petugas', petugas);
-  return response.data;
-};
-
-export const deletePetugas = async (id: number) => {
-  const response = await api.delete(`/petugas/${id}`);
-  return response.data;
-};
-
-// Tugas API
-export const getTasks = async (limit = 100) => {
-  const response = await api.get(`/tasks?limit=${limit}`);
-  return response.data;
-};
-
-export const createTask = async (task: { id_petugas: number; nama_tugas: string; target_ruangan: string }) => {
-  const response = await api.post('/tasks', task);
-  return response.data;
-};
-
-export const updateTaskStatus = async (id: number, status: string) => {
-  const response = await api.put(`/tasks/${id}/status`, { status_tugas: status });
+// Devices that have at least one saved position (usable candidates for the heatmap)
+export const getTrackedDevices = async () => {
+  const response = await api.get('/devices/tracked');
   return response.data;
 };
 

@@ -1,7 +1,7 @@
 {
   "room": {
-    "width_m": 10.0,
-    "height_m": 8.0
+    "width_m": 9.0,
+    "height_m": 4.5
   },
   "anchors": {
     "scanner-01": {
@@ -10,40 +10,42 @@
       "label": "Anchor 1 (Bottom-Left)"
     },
     "scanner-02": {
-      "x": 10.0,
+      "x": 9.0,
       "y": 0.0,
       "label": "Anchor 2 (Bottom-Right)"
     },
     "scanner-03": {
       "x": 5.0,
-      "y": 8.0,
+      "y": 4.5,
       "label": "Anchor 3 (Top-Center)"
     }
   },
   "calibration": {
-    "path_loss_exponent": 2,
+    "path_loss_exponent": 2.5,
     "tx_power_dbm": -59,
-    "min_rssi_threshold": -80,
-    "scan_ttl_seconds": 15
+    "min_rssi_threshold": -95,
+    "scan_ttl_seconds": 20,
+    "heatmap_stationary_radius_m": 0.5,
+    "heatmap_max_gap_seconds": 300
   },
   "zones": {
-    "Ruang VIP": {
-      "x_min": 0.0,
-      "x_max": 5.0,
-      "y_min": 0.0,
-      "y_max": 4.0
-    },
-    "Pantry": {
-      "x_min": 5.0,
-      "x_max": 10.0,
-      "y_min": 0.0,
-      "y_max": 4.0
-    },
     "Lobi": {
       "x_min": 0.0,
       "x_max": 10.0,
       "y_min": 4.0,
       "y_max": 8.0
+    },
+    "ZetaB01": {
+      "x_min": 0.0,
+      "x_max": 5.0,
+      "y_min": 0.0,
+      "y_max": 4.0
+    },
+    "zetaB02": {
+      "x_min": 5.0,
+      "x_max": 10.0,
+      "y_min": 0.0,
+      "y_max": 4.0
     }
   },
   "beacon_filters": []

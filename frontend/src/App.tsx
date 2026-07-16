@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { 
-  LayoutDashboard, 
-  Sliders, 
-  Calendar, 
-  Users, 
-  CheckSquare, 
-  Activity, 
-  Map, 
+import {
+  LayoutDashboard,
+  Sliders,
+  Smartphone,
+  Activity,
+  Map,
   Database,
   Wifi,
   WifiOff,
@@ -17,9 +15,7 @@ import RoomMap from './components/RoomMap';
 import AnchorPanel from './components/AnchorPanel';
 import CalibrationForm from './components/CalibrationForm';
 import Terminal from './components/Terminal';
-import ShiftManagement from './components/ShiftManagement';
-import PetugasManagement from './components/PetugasManagement';
-import TaskManagement from './components/TaskManagement';
+import DeviceManagement from './components/DeviceManagement';
 import SignalMonitor from './components/SignalMonitor';
 import HeatmapView from './components/HeatmapView';
 import PruningSettings from './components/PruningSettings';
@@ -29,6 +25,7 @@ import {
   getScanData,
   getFullConfig,
   getHealth,
+  getZones,
 } from './services/api';
 
 interface Anchor {
@@ -55,6 +52,14 @@ interface Position {
   }>;
 }
 
+interface Zone {
+  name: string;
+  x_min: number;
+  x_max: number;
+  y_min: number;
+  y_max: number;
+}
+
 interface ScanEntry {
   anchor_id: string;
   anchor_pos: [number, number];
@@ -69,7 +74,7 @@ interface ScanEntry {
   age_seconds: number;
 }
 
-type Page = 'dashboard' | 'calibration' | 'shifts' | 'petugas' | 'tasks' | 'signal_monitor' | 'heatmap' | 'pruning';
+type Page = 'dashboard' | 'calibration' | 'devices' | 'signal_monitor' | 'heatmap' | 'pruning';
 
 const SOCKET_URL = `http://${window.location.hostname}:5000`;
 
@@ -79,6 +84,7 @@ function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [scanData, setScanData] = useState<ScanEntry[]>([]);
   const [roomDims, setRoomDims] = useState({ width: 10, height: 8 });
+  const [zones, setZones] = useState<Zone[]>([]);
   const [health, setHealth] = useState<{ status: string; anchors_reporting: number; anchors_total: number; beacons_tracked: number; system_ready: boolean } | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
@@ -135,7 +141,14 @@ function App() {
     }
   }, []);
 
-
+  const fetchZones = useCallback(async () => {
+    try {
+      const data = await getZones();
+      setZones(data.zones || []);
+    } catch (err) {
+      console.error('Failed to fetch zones:', err);
+    }
+  }, []);
 
   // Initial data load
   useEffect(() => {
@@ -144,7 +157,8 @@ function App() {
     fetchScanData();
     fetchConfig();
     fetchHealth();
-  }, [fetchAnchors, fetchPositions, fetchScanData, fetchConfig, fetchHealth]);
+    fetchZones();
+  }, [fetchAnchors, fetchPositions, fetchScanData, fetchConfig, fetchHealth, fetchZones]);
 
   // Periodic polling (fallback if WebSocket not connected)
   useEffect(() => {
@@ -220,25 +234,11 @@ function App() {
             <span>Calibration</span>
           </button>
           <button
-            className={`sidebar-link ${page === 'shifts' ? 'active' : ''}`}
-            onClick={() => setPage('shifts')}
+            className={`sidebar-link ${page === 'devices' ? 'active' : ''}`}
+            onClick={() => setPage('devices')}
           >
-            <Calendar size={20} />
-            <span>Shift Kerja</span>
-          </button>
-          <button
-            className={`sidebar-link ${page === 'petugas' ? 'active' : ''}`}
-            onClick={() => setPage('petugas')}
-          >
-            <Users size={20} />
-            <span>Petugas & Beacon</span>
-          </button>
-          <button
-            className={`sidebar-link ${page === 'tasks' ? 'active' : ''}`}
-            onClick={() => setPage('tasks')}
-          >
-            <CheckSquare size={20} />
-            <span>Penugasan</span>
+            <Smartphone size={20} />
+            <span>Device</span>
           </button>
           <button
             className={`sidebar-link ${page === 'signal_monitor' ? 'active' : ''}`}
@@ -292,9 +292,7 @@ function App() {
           <h1>
             {page === 'dashboard' && 'Dashboard Overview'}
             {page === 'calibration' && 'Signal & Room Calibration'}
-            {page === 'shifts' && 'Shift Kerja Management'}
-            {page === 'petugas' && 'Petugas & Beacon Management'}
-            {page === 'tasks' && 'Penugasan & Task Tracking'}
+            {page === 'devices' && 'Device Management'}
             {page === 'signal_monitor' && 'Real-Time Signal Monitor'}
             {page === 'heatmap' && 'Duration Heatmap Analysis'}
             {page === 'pruning' && 'Database Pruning Settings'}
@@ -328,6 +326,7 @@ function App() {
                     positions={health?.system_ready ? positions : []}
                     roomWidth={roomDims.width}
                     roomHeight={roomDims.height}
+                    zones={zones}
                   />
                 </div>
                 <div className="dashboard-panel">
@@ -381,29 +380,19 @@ function App() {
             <div className="calibration-page">
               <CalibrationForm
                 anchors={anchors}
+                zones={zones}
                 onAnchorsUpdated={() => {
                   fetchAnchors();
                   fetchConfig();
+                  fetchZones();
                 }}
               />
             </div>
           )}
 
-          {page === 'shifts' && (
-            <div className="shifts-page">
-              <ShiftManagement />
-            </div>
-          )}
-
-          {page === 'petugas' && (
-            <div className="petugas-page">
-              <PetugasManagement />
-            </div>
-          )}
-
-          {page === 'tasks' && (
-            <div className="tasks-page">
-              <TaskManagement />
+          {page === 'devices' && (
+            <div className="devices-page">
+              <DeviceManagement scanData={scanData} />
             </div>
           )}
 
@@ -415,7 +404,7 @@ function App() {
 
           {page === 'heatmap' && (
             <div className="heatmap-page">
-              <HeatmapView roomWidth={roomDims.width} roomHeight={roomDims.height} />
+              <HeatmapView roomWidth={roomDims.width} roomHeight={roomDims.height} anchors={anchors} zones={zones} />
             </div>
           )}
 

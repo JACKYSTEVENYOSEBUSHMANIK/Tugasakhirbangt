@@ -129,7 +129,7 @@ def trilaterate(anchor_distances, anchor_positions):
             max_nfev=1000,
         )
 
-        estimated_x, estimated_y = result.x
+        estimated_x, estimated_y = float(result.x[0]), float(result.x[1])
 
         # Calculate position error (RMS of residuals)
         res = residuals(result.x)
@@ -137,7 +137,7 @@ def trilaterate(anchor_distances, anchor_positions):
 
         return {
             "position": (round(estimated_x, 2), round(estimated_y, 2)),
-            "error": round(error, 3),
+            "error": round(float(error), 3),
             "anchors_used": len(valid),
             "method": "least_squares",
         }

@@ -46,18 +46,18 @@ function AnchorPanel({ anchors, scanData }: AnchorPanelProps) {
     color: string;
   } => {
     if (!anchor.online && !scan) {
-      return { stage: 0, label: 'Offline - Not reporting', color: '#dc3545' };
+      return { stage: 0, label: 'Offline - Not reporting', color: '#dc2626' };
     }
     if (!scan) {
-      return { stage: 1, label: 'WiFi connected, no data yet', color: '#ffc107' };
+      return { stage: 1, label: 'WiFi connected, no data yet', color: '#d97706' };
     }
     if (scan.age_seconds > 20) {
-      return { stage: 1, label: 'Data stale - ESP may be disconnected', color: '#ffc107' };
+      return { stage: 1, label: 'Data stale - ESP may be disconnected', color: '#d97706' };
     }
     if (scan.beacons.length === 0) {
-      return { stage: 2, label: 'Connected to backend, no beacons seen', color: '#17a2b8' };
+      return { stage: 2, label: 'Connected to backend, no beacons seen', color: '#2563eb' };
     }
-    return { stage: 3, label: 'Active - Sending data to backend', color: '#28a745' };
+    return { stage: 3, label: 'Active - Sending data to backend', color: '#16a34a' };
   };
 
   return (

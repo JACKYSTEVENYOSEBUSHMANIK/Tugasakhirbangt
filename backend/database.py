@@ -142,6 +142,102 @@ def save_beacon(beacon_id, name):
         finally:
             conn.close()
 
+def get_beacons_list():
+    if is_http_mode():
+        return http_get("beacons", {"order": "created_at.desc"})
+    else:
+        from psycopg2.extras import RealDictCursor
+        conn = get_tcp_connection()
+        if not conn: return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT beacon_id, name, created_at FROM beacons ORDER BY created_at DESC;")
+                results = cur.fetchall()
+                for r in results:
+                    r["created_at"] = r["created_at"].isoformat()
+                return results
+        except Exception as e:
+            print(f"NeonDB TCP get_beacons_list error: {e}")
+            return []
+        finally:
+            conn.close()
+
+def get_tracked_beacons():
+    """Beacons that have at least one saved position — i.e. could plausibly show heatmap data."""
+    if is_http_mode():
+        recent = http_get("beacon_positions", {"select": "beacon_id", "order": "timestamp.desc", "limit": 2000}) or []
+        seen = []
+        seen_set = set()
+        for row in recent:
+            bid = row.get("beacon_id")
+            if bid and bid not in seen_set:
+                seen_set.add(bid)
+                seen.append(bid)
+        names = {b["beacon_id"]: b.get("name") for b in (get_beacons_list() or [])}
+        return [{"beacon_id": bid, "name": names.get(bid) or bid} for bid in seen]
+    else:
+        from psycopg2.extras import RealDictCursor
+        conn = get_tcp_connection()
+        if not conn: return []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT DISTINCT ON (bp.beacon_id) bp.beacon_id, b.name, bp.timestamp AS last_seen
+                    FROM beacon_positions bp
+                    LEFT JOIN beacons b ON b.beacon_id = bp.beacon_id
+                    ORDER BY bp.beacon_id, bp.timestamp DESC;
+                """)
+                results = cur.fetchall()
+                results.sort(key=lambda r: r["last_seen"], reverse=True)
+                for r in results:
+                    r["last_seen"] = r["last_seen"].isoformat()
+                return results
+        except Exception as e:
+            print(f"NeonDB TCP get_tracked_beacons error: {e}")
+            return []
+        finally:
+            conn.close()
+
+def upsert_device(beacon_id, name):
+    """Create or rename a device entry (user-driven, overwrites the name)."""
+    if is_http_mode():
+        payload = {"beacon_id": beacon_id, "name": name}
+        return http_post("beacons", payload)
+    else:
+        conn = get_tcp_connection()
+        if not conn: return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO beacons (beacon_id, name)
+                    VALUES (%s, %s)
+                    ON CONFLICT (beacon_id) DO UPDATE SET name = EXCLUDED.name;
+                """, (beacon_id, name))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"NeonDB TCP upsert_device error: {e}")
+            return None
+        finally:
+            conn.close()
+
+def delete_beacon(beacon_id):
+    if is_http_mode():
+        return http_delete("beacons", {"beacon_id": f"eq.{beacon_id}"})
+    else:
+        conn = get_tcp_connection()
+        if not conn: return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM beacons WHERE beacon_id = %s;", (beacon_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"NeonDB TCP delete_beacon error: {e}")
+            return None
+        finally:
+            conn.close()
+
 def save_rssi_log(anchor_id, beacon_id, rssi, tx_power, distance, timestamp):
     ts_str = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
     if is_http_mode():
@@ -286,289 +382,6 @@ def get_rssi_history(beacon_id, limit=100):
         except Exception as e:
             print(f"NeonDB TCP get_rssi_history error: {e}")
             return []
-        finally:
-            conn.close()
-
-# --- Shift Kerja CRUD ---
-def save_shift(nama_shift, jam_mulai, jam_selesai, id_shift=None):
-    if is_http_mode():
-        payload = {
-            "nama_shift": nama_shift,
-            "jam_mulai": jam_mulai,
-            "jam_selesai": jam_selesai
-        }
-        if id_shift:
-            return http_patch("shift_kerja", {"id_shift": f"eq.{id_shift}"}, payload)
-        return http_post("shift_kerja", payload)
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                if id_shift:
-                    cur.execute("""
-                        UPDATE shift_kerja 
-                        SET nama_shift = %s, jam_mulai = %s, jam_selesai = %s 
-                        WHERE id_shift = %s;
-                    """, (nama_shift, jam_mulai, jam_selesai, id_shift))
-                else:
-                    cur.execute("""
-                        INSERT INTO shift_kerja (nama_shift, jam_mulai, jam_selesai) 
-                        VALUES (%s, %s, %s);
-                    """, (nama_shift, jam_mulai, jam_selesai))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP save_shift error: {e}")
-            return None
-        finally:
-            conn.close()
-
-def get_shifts():
-    if is_http_mode():
-        return http_get("shift_kerja", {"order": "id_shift.asc"})
-    else:
-        from psycopg2.extras import RealDictCursor
-        conn = get_tcp_connection()
-        if not conn: return []
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT id_shift, nama_shift, jam_mulai, jam_selesai FROM shift_kerja ORDER BY id_shift ASC;")
-                results = cur.fetchall()
-                for r in results:
-                    r["jam_mulai"] = str(r["jam_mulai"])
-                    r["jam_selesai"] = str(r["jam_selesai"])
-                return results
-        except Exception as e:
-            print(f"NeonDB TCP get_shifts error: {e}")
-            return []
-        finally:
-            conn.close()
-
-def delete_shift(id_shift):
-    if is_http_mode():
-        return http_delete("shift_kerja", {"id_shift": f"eq.{id_shift}"})
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM shift_kerja WHERE id_shift = %s;", (id_shift,))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP delete_shift error: {e}")
-            return None
-        finally:
-            conn.close()
-
-# --- Petugas CRUD ---
-def save_petugas(nama, beacon_id, id_shift, id_petugas=None):
-    # Set to None if empty string
-    b_id = beacon_id if beacon_id else None
-    s_id = id_shift if id_shift else None
-    
-    if is_http_mode():
-        if b_id:
-            save_beacon(b_id, f"Beacon {b_id[-8:]}")
-        payload = {
-            "nama": nama,
-            "beacon_id": b_id,
-            "id_shift": s_id
-        }
-        if id_petugas:
-            return http_patch("petugas", {"id_petugas": f"eq.{id_petugas}"}, payload)
-        return http_post("petugas", payload)
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                if b_id:
-                    cur.execute("""
-                        INSERT INTO beacons (beacon_id, name)
-                        VALUES (%s, %s)
-                        ON CONFLICT (beacon_id) DO NOTHING;
-                    """, (b_id, f"Beacon {b_id[-8:]}"))
-                if id_petugas:
-                    cur.execute("""
-                        UPDATE petugas 
-                        SET nama = %s, beacon_id = %s, id_shift = %s 
-                        WHERE id_petugas = %s;
-                    """, (nama, b_id, s_id, id_petugas))
-                else:
-                    cur.execute("""
-                        INSERT INTO petugas (nama, beacon_id, id_shift) 
-                        VALUES (%s, %s, %s);
-                    """, (nama, b_id, s_id))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP save_petugas error: {e}")
-            return None
-        finally:
-            conn.close()
-
-def get_petugas_list():
-    if is_http_mode():
-        # Using PostgREST resource embedding to fetch shift details
-        return http_get("petugas", {"select": "*,shift_kerja(*)", "order": "id_petugas.asc"})
-    else:
-        from psycopg2.extras import RealDictCursor
-        conn = get_tcp_connection()
-        if not conn: return []
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT p.id_petugas, p.nama, p.beacon_id, p.id_shift, p.created_at,
-                           s.nama_shift, s.jam_mulai, s.jam_selesai
-                    FROM petugas p
-                    LEFT JOIN shift_kerja s ON p.id_shift = s.id_shift
-                    ORDER BY p.id_petugas ASC;
-                """)
-                results = cur.fetchall()
-                for r in results:
-                    r["created_at"] = r["created_at"].isoformat()
-                    if r.get("id_shift"):
-                        r["shift_kerja"] = {
-                            "id_shift": r["id_shift"],
-                            "nama_shift": r["nama_shift"],
-                            "jam_mulai": str(r["jam_mulai"]),
-                            "jam_selesai": str(r["jam_selesai"])
-                        }
-                    else:
-                        r["shift_kerja"] = None
-                    if "jam_mulai" in r: del r["jam_mulai"]
-                    if "jam_selesai" in r: del r["jam_selesai"]
-                return results
-        except Exception as e:
-            print(f"NeonDB TCP get_petugas_list error: {e}")
-            return []
-        finally:
-            conn.close()
-
-def delete_petugas(id_petugas):
-    if is_http_mode():
-        return http_delete("petugas", {"id_petugas": f"eq.{id_petugas}"})
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM petugas WHERE id_petugas = %s;", (id_petugas,))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP delete_petugas error: {e}")
-            return None
-        finally:
-            conn.close()
-
-# --- Tugas Petugas CRUD ---
-def save_task(id_petugas, nama_tugas, target_ruangan, id_tugas=None):
-    if is_http_mode():
-        payload = {
-            "id_petugas": id_petugas,
-            "nama_tugas": nama_tugas,
-            "target_ruangan": target_ruangan
-        }
-        if id_tugas:
-            return http_patch("tugas_petugas", {"id_tugas": f"eq.{id_tugas}"}, payload)
-        return http_post("tugas_petugas", payload)
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                if id_tugas:
-                    cur.execute("""
-                        UPDATE tugas_petugas 
-                        SET id_petugas = %s, nama_tugas = %s, target_ruangan = %s 
-                        WHERE id_tugas = %s;
-                    """, (id_petugas, nama_tugas, target_ruangan, id_tugas))
-                else:
-                    cur.execute("""
-                        INSERT INTO tugas_petugas (id_petugas, nama_tugas, target_ruangan) 
-                        VALUES (%s, %s, %s);
-                    """, (id_petugas, nama_tugas, target_ruangan))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP save_task error: {e}")
-            return None
-        finally:
-            conn.close()
-
-def get_tasks(limit=100):
-    if is_http_mode():
-        return http_get("tugas_petugas", {"select": "*,petugas(*)", "order": "id_tugas.desc", "limit": limit})
-    else:
-        from psycopg2.extras import RealDictCursor
-        conn = get_tcp_connection()
-        if not conn: return []
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT t.id_tugas, t.id_petugas, t.nama_tugas, t.target_ruangan, t.status_tugas, 
-                           t.waktu_mulai, t.waktu_selesai, p.nama as petugas_nama, p.beacon_id
-                    FROM tugas_petugas t
-                    LEFT JOIN petugas p ON t.id_petugas = p.id_petugas
-                    ORDER BY t.id_tugas DESC
-                    LIMIT %s;
-                """, (limit,))
-                results = cur.fetchall()
-                for r in results:
-                    if r["waktu_mulai"]: r["waktu_mulai"] = r["waktu_mulai"].isoformat()
-                    if r["waktu_selesai"]: r["waktu_selesai"] = r["waktu_selesai"].isoformat()
-                    r["petugas"] = {
-                        "id_petugas": r["id_petugas"],
-                        "nama": r["petugas_nama"],
-                        "beacon_id": r["beacon_id"]
-                    }
-                return results
-        except Exception as e:
-            print(f"NeonDB TCP get_tasks error: {e}")
-            return []
-        finally:
-            conn.close()
-
-def update_task_status(id_tugas, status_tugas, waktu_mulai=None, waktu_selesai=None):
-    payload = {"status_tugas": status_tugas}
-    if waktu_mulai:
-        payload["waktu_mulai"] = waktu_mulai.isoformat() if hasattr(waktu_mulai, "isoformat") else str(waktu_mulai)
-    if waktu_selesai:
-        payload["waktu_selesai"] = waktu_selesai.isoformat() if hasattr(waktu_selesai, "isoformat") else str(waktu_selesai)
-        
-    if is_http_mode():
-        return http_patch("tugas_petugas", {"id_tugas": f"eq.{id_tugas}"}, payload)
-    else:
-        conn = get_tcp_connection()
-        if not conn: return None
-        try:
-            with conn.cursor() as cur:
-                if status_tugas == "On Progress":
-                    cur.execute("""
-                        UPDATE tugas_petugas 
-                        SET status_tugas = %s, waktu_mulai = COALESCE(waktu_mulai, %s)
-                        WHERE id_tugas = %s;
-                    """, (status_tugas, waktu_mulai or datetime.utcnow(), id_tugas))
-                elif status_tugas == "Completed":
-                    cur.execute("""
-                        UPDATE tugas_petugas 
-                        SET status_tugas = %s, waktu_selesai = COALESCE(waktu_selesai, %s)
-                        WHERE id_tugas = %s;
-                    """, (status_tugas, waktu_selesai or datetime.utcnow(), id_tugas))
-                else:
-                    cur.execute("""
-                        UPDATE tugas_petugas 
-                        SET status_tugas = %s 
-                        WHERE id_tugas = %s;
-                    """, (status_tugas, id_tugas))
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"NeonDB TCP update_task_status error: {e}")
-            return None
         finally:
             conn.close()
 
@@ -926,58 +739,4 @@ def execute_pruning(days):
             return False
         finally:
             conn.close()
-
-def is_petugas_on_shift(beacon_id):
-    import datetime
-    # 1. Fetch shift info for officer linked to beacon_id
-    if is_http_mode():
-        # Get officer matching beacon_id
-        petugas = http_get("petugas", {"beacon_id": f"eq.{beacon_id}", "select": "*,shift_kerja(*)"})
-        if not petugas or not petugas[0].get("shift_kerja"):
-            # If no shift assigned, default to True (always track)
-            return True
-        shift = petugas[0]["shift_kerja"]
-        jam_mulai_str = shift["jam_mulai"]
-        jam_selesai_str = shift["jam_selesai"]
-    else:
-        conn = get_tcp_connection()
-        if not conn: return True
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT s.jam_mulai, s.jam_selesai 
-                    FROM petugas p
-                    JOIN shift_kerja s ON p.id_shift = s.id_shift
-                    WHERE p.beacon_id = %s;
-                """, (beacon_id,))
-                res = cur.fetchone()
-                if not res:
-                    return True
-                jam_mulai_str = str(res[0])
-                jam_selesai_str = str(res[1])
-        except Exception as e:
-            print(f"Error checking shift: {e}")
-            return True
-        finally:
-            conn.close()
-            
-    # Parse times
-    try:
-        def parse_time(t_str):
-            # Parse '08:00:00' or similar
-            parts = list(map(int, t_str.split(':')))
-            return datetime.time(parts[0], parts[1], parts[2] if len(parts) > 2 else 0)
-        
-        start_time = parse_time(jam_mulai_str)
-        end_time = parse_time(jam_selesai_str)
-        now_time = datetime.datetime.now().time()
-        
-        if start_time <= end_time:
-            return start_time <= now_time <= end_time
-        else: # midnight crossing shift, e.g. 22:00 to 06:00
-            return now_time >= start_time or now_time <= end_time
-    except Exception as e:
-        print(f"Error parsing shift times: {e}")
-        return True
-
 

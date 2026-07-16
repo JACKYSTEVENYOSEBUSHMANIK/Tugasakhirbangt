@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { updateAnchors, updateCalibration, getCalibration } from '../services/api';
+import { updateAnchors, updateCalibration, updateRoom, getCalibration, createZone, deleteZone } from '../services/api';
+import RoomMap, { type Zone, type ZoneBounds } from './RoomMap';
 
 interface Anchor {
   anchor_id: string;
@@ -8,26 +9,15 @@ interface Anchor {
   label: string;
 }
 
-interface CalibrationData {
-  calibration: {
-    path_loss_exponent: number;
-    tx_power_dbm: number;
-    min_rssi_threshold: number;
-    scan_ttl_seconds: number;
-  };
-  room: {
-    width_m: number;
-    height_m: number;
-  };
-  beacon_filters: string[];
-}
-
 interface CalibrationFormProps {
   anchors: Anchor[];
+  zones: Zone[];
   onAnchorsUpdated: () => void;
 }
 
-function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
+const EMPTY_DRAFT = { name: '', x_min: 0, x_max: 0, y_min: 0, y_max: 0 };
+
+function CalibrationForm({ anchors, zones, onAnchorsUpdated }: CalibrationFormProps) {
   const [anchorPositions, setAnchorPositions] = useState(
     anchors.map((a) => ({ anchor_id: a.anchor_id, x: a.x, y: a.y }))
   );
@@ -38,6 +28,7 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
     scan_ttl_seconds: 15,
   });
   const [roomDimensions, setRoomDimensions] = useState({ width: 10, height: 8 });
+  const [zoneDraft, setZoneDraft] = useState(EMPTY_DRAFT);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -108,6 +99,71 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
     setLoading(false);
   };
 
+  const handleSaveRoom = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      await updateRoom({ width_m: roomDimensions.width, height_m: roomDimensions.height });
+      setMessage('Room dimensions saved!');
+      onAnchorsUpdated();
+    } catch (err) {
+      setMessage('Failed to save room dimensions');
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  const handleZoneDraw = (bounds: ZoneBounds) => {
+    setZoneDraft((prev) => ({ ...prev, ...bounds }));
+  };
+
+  const handleSaveZone = async () => {
+    if (!zoneDraft.name.trim()) {
+      setMessage('Nama ruangan wajib diisi');
+      return;
+    }
+    if (zoneDraft.x_max <= zoneDraft.x_min || zoneDraft.y_max <= zoneDraft.y_min) {
+      setMessage('Batas ruangan tidak valid — gambar atau isi ukurannya dulu');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      await createZone(zoneDraft);
+      setMessage(`Ruangan "${zoneDraft.name}" disimpan!`);
+      setZoneDraft(EMPTY_DRAFT);
+      onAnchorsUpdated();
+    } catch (err) {
+      setMessage('Failed to save zone');
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  const handleEditZone = (zone: Zone) => {
+    setZoneDraft({ ...zone });
+  };
+
+  const handleDeleteZone = async (name: string) => {
+    setLoading(true);
+    setMessage('');
+    try {
+      await deleteZone(name);
+      setMessage(`Ruangan "${name}" dihapus`);
+      if (zoneDraft.name === name) setZoneDraft(EMPTY_DRAFT);
+      onAnchorsUpdated();
+    } catch (err) {
+      setMessage('Failed to delete zone');
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  const draftBounds: ZoneBounds | null =
+    zoneDraft.x_max > zoneDraft.x_min && zoneDraft.y_max > zoneDraft.y_min
+      ? { x_min: zoneDraft.x_min, x_max: zoneDraft.x_max, y_min: zoneDraft.y_min, y_max: zoneDraft.y_max }
+      : null;
+
   return (
     <div className="calibration-form">
       <h2>Calibration Settings</h2>
@@ -119,28 +175,28 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
             Width (m):
             <input
               type="number"
-              step="0.5"
+              step="0.1"
               value={roomDimensions.width}
               onChange={(e) =>
                 setRoomDimensions({ ...roomDimensions, width: parseFloat(e.target.value) || 0 })
               }
-              disabled
             />
           </label>
           <label>
             Height (m):
             <input
               type="number"
-              step="0.5"
+              step="0.1"
               value={roomDimensions.height}
               onChange={(e) =>
                 setRoomDimensions({ ...roomDimensions, height: parseFloat(e.target.value) || 0 })
               }
-              disabled
             />
           </label>
         </div>
-        <p className="hint">Room dimensions are set in backend config.json</p>
+        <button onClick={handleSaveRoom} disabled={loading} className="btn btn-primary">
+          Save Room Dimensions
+        </button>
       </div>
 
       <div className="calib-section">
@@ -178,6 +234,116 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
         <button onClick={handleSaveAnchors} disabled={loading} className="btn btn-primary">
           Save Anchor Positions
         </button>
+      </div>
+
+      <div className="calib-section">
+        <h3>Ruangan / Zona</h3>
+        <p className="section-desc">
+          Beri nama setiap ruangan di dalam area ini — ketik namanya bebas, lalu tentukan batasnya
+          dengan menggambar (klik-drag) di peta di bawah, atau mengisi koordinat meter secara manual.
+          Nama ruangan ini akan muncul sebagai pilihan "Target Ruangan" saat membuat penugasan.
+        </p>
+
+        <RoomMap
+          anchors={anchors.map((a) => ({ ...a, online: true }))}
+          positions={[]}
+          roomWidth={roomDimensions.width}
+          roomHeight={roomDimensions.height}
+          zones={zones}
+          editable
+          draftZone={draftBounds}
+          onZoneDraw={handleZoneDraw}
+        />
+
+        <div className="form-row" style={{ marginTop: 20 }}>
+          <label>
+            Nama Ruangan:
+            <input
+              type="text"
+              placeholder="Contoh: Ruang Server"
+              value={zoneDraft.name}
+              onChange={(e) => setZoneDraft({ ...zoneDraft, name: e.target.value })}
+            />
+          </label>
+        </div>
+        <div className="form-grid">
+          <label>
+            X Min (m):
+            <input
+              type="number"
+              step="0.1"
+              value={zoneDraft.x_min}
+              onChange={(e) => setZoneDraft({ ...zoneDraft, x_min: parseFloat(e.target.value) || 0 })}
+            />
+          </label>
+          <label>
+            X Max (m):
+            <input
+              type="number"
+              step="0.1"
+              value={zoneDraft.x_max}
+              onChange={(e) => setZoneDraft({ ...zoneDraft, x_max: parseFloat(e.target.value) || 0 })}
+            />
+          </label>
+          <label>
+            Y Min (m):
+            <input
+              type="number"
+              step="0.1"
+              value={zoneDraft.y_min}
+              onChange={(e) => setZoneDraft({ ...zoneDraft, y_min: parseFloat(e.target.value) || 0 })}
+            />
+          </label>
+          <label>
+            Y Max (m):
+            <input
+              type="number"
+              step="0.1"
+              value={zoneDraft.y_max}
+              onChange={(e) => setZoneDraft({ ...zoneDraft, y_max: parseFloat(e.target.value) || 0 })}
+            />
+          </label>
+        </div>
+        <div className="form-actions" style={{ display: 'flex', gap: 12 }}>
+          <button onClick={handleSaveZone} disabled={loading} className="btn btn-primary">
+            Simpan Ruangan
+          </button>
+          {zoneDraft.name && (
+            <button onClick={() => setZoneDraft(EMPTY_DRAFT)} disabled={loading} className="btn btn-secondary">
+              Batal
+            </button>
+          )}
+        </div>
+
+        {zones.length > 0 && (
+          <table className="positions-table" style={{ marginTop: 20 }}>
+            <thead>
+              <tr>
+                <th>Nama Ruangan</th>
+                <th>Batas (m)</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {zones.map((z) => (
+                <tr key={z.name}>
+                  <td>{z.name}</td>
+                  <td className="font-mono">
+                    x: {z.x_min}–{z.x_max}, y: {z.y_min}–{z.y_max}
+                  </td>
+                  <td style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => handleEditZone(z)} className="btn btn-secondary" style={{ padding: '6px 12px' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => handleDeleteZone(z.name)} className="btn btn-danger" style={{ padding: '6px 12px' }}>
+                      Hapus
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="calib-section">
@@ -270,7 +436,7 @@ function CalibrationForm({ anchors, onAnchorsUpdated }: CalibrationFormProps) {
       </div>
 
       {message && (
-        <div className={`message ${message.includes('Failed') ? 'error' : 'success'}`}>
+        <div className={`message ${message.toLowerCase().includes('failed') ? 'error' : 'success'}`}>
           {message}
         </div>
       )}

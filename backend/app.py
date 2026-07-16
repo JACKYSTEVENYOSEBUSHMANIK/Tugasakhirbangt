@@ -22,7 +22,10 @@ from config import (
     get_calibration_params,
     update_anchor_position,
     update_calibration_params,
-    get_ruangan_for_position,
+    update_room_dimensions,
+    list_zones,
+    add_or_update_zone,
+    delete_zone,
 )
 from trilateration import calculate_position, rssi_to_distance
 
@@ -74,61 +77,6 @@ def is_scan_fresh(anchor_id, ttl_seconds=15):
     return (time.time() * 1000 - entry.get("received_at", 0)) < ttl_seconds * 1000
 
 
-def check_and_update_tasks(positions_dict):
-    """F5: Task Location Matching Check"""
-    try:
-        # Fetch all tasks from DB
-        tasks = database.get_tasks()
-        active_tasks = [t for t in tasks if t["status_tugas"] in ["Pending", "On Progress"]]
-        if not active_tasks:
-            return
-            
-        config_data = load_config()
-        now = datetime.utcnow()
-        
-        for task in active_tasks:
-            officer = task.get("petugas", {})
-            beacon_id = officer.get("beacon_id")
-            if not beacon_id or beacon_id not in positions_dict:
-                continue
-                
-            pos_res = positions_dict[beacon_id]
-            pos = pos_res.get("position")
-            if not pos:
-                continue
-                
-            current_ruangan = get_ruangan_for_position(pos[0], pos[1], config_data)
-            target = task["target_ruangan"]
-            status = task["status_tugas"]
-            id_tugas = task["id_tugas"]
-            
-            if status == "Pending":
-                if current_ruangan == target:
-                    # Officer entered target room
-                    database.update_task_status(id_tugas, "On Progress", waktu_mulai=now)
-                    add_log("INFO", "SYSTEM", f"Tugas '{task['nama_tugas']}' dimulai (petugas memasuki {target})")
-            elif status == "On Progress":
-                # Check how long they've been in the room
-                start_time_str = task.get("waktu_mulai")
-                if start_time_str:
-                    try:
-                        # Parse ISO timestamp
-                        start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                        duration = (now - start_time).total_seconds()
-                        if current_ruangan == target:
-                            if duration >= 10: # Minimum 10 seconds check-in
-                                database.update_task_status(id_tugas, "Completed", waktu_selesai=now)
-                                add_log("INFO", "SYSTEM", f"Tugas '{task['nama_tugas']}' selesai (petugas berada di {target} selama {int(duration)} detik)")
-                        else:
-                            # Completed because they checked it and left
-                            database.update_task_status(id_tugas, "Completed", waktu_selesai=now)
-                            add_log("INFO", "SYSTEM", f"Tugas '{task['nama_tugas']}' selesai (petugas telah memeriksa {target})")
-                    except Exception as e:
-                        print(f"Error calculating task duration: {e}")
-    except Exception as ex:
-        print(f"Error checking and updating tasks: {ex}")
-
-
 def run_trilateration_for_all_beacons():
     """Run trilateration for all beacons visible to 3+ anchors."""
     config = load_config()
@@ -164,13 +112,6 @@ def run_trilateration_for_all_beacons():
                 # Apply beacon filter if configured
                 if beacon_filters and bid not in beacon_filters:
                     continue
-
-                # F4: Smart Tracking Toggle (Skip if officer not on shift)
-                try:
-                    if not database.is_petugas_on_shift(bid):
-                        continue
-                except Exception as e:
-                    print(f"Error checking shift: {e}")
 
                 if bid not in beacon_readings:
                     beacon_readings[bid] = {}
@@ -239,9 +180,7 @@ def run_trilateration_for_all_beacons():
                         res.get("anchors_used", 0),
                         datetime.utcnow()
                     )
-            # F5: Task Location Matching Check
-            check_and_update_tasks(positions)
-            
+
         threading.Thread(
             target=db_save_positions_async,
             args=(results,),
@@ -319,6 +258,9 @@ def receive_scan():
 
     # Store scan data with server receive time
     beacons = data.get("beacons", [])
+    for b in beacons:
+        if b.get("beacon_id"):
+            b["beacon_id"] = b["beacon_id"].strip().upper()
     with scan_store_lock:
         scan_store[anchor_id] = {
             "anchor_id": anchor_id,
@@ -365,13 +307,6 @@ def receive_scan():
             
             for b in b_list:
                 bid = b.get("beacon_id")
-                
-                # F4: Smart Tracking Toggle (skip if officer not on shift)
-                try:
-                    if not database.is_petugas_on_shift(bid):
-                        continue
-                except Exception as e:
-                    print(f"Error checking shift: {e}")
 
                 rssi = b.get("rssi")
                 tx = b.get("tx_power", default_tx)
@@ -498,12 +433,66 @@ def update_anchors():
     })
 
 
+@app.route("/api/room", methods=["PUT"])
+def update_room():
+    """
+    Update the room's overall dimensions.
+
+    Expected JSON: {"width_m": 10.0, "height_m": 8.0}
+    """
+    data = request.get_json()
+    if not data or "width_m" not in data or "height_m" not in data:
+        return jsonify({"error": "width_m and height_m are required"}), 400
+    try:
+        room = update_room_dimensions(data["width_m"], data["height_m"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "width_m and height_m must be numbers"}), 400
+    return jsonify({"status": "updated", "room": room})
+
+
+@app.route("/api/zones", methods=["GET"])
+def get_zones():
+    """List all named zones (ruangan) defined within the room."""
+    return jsonify({"zones": list_zones()})
+
+
+@app.route("/api/zones", methods=["POST"])
+def create_zone():
+    """
+    Create or overwrite a zone by name.
+
+    Expected JSON: {"name": "Ruang VIP", "x_min": 0, "x_max": 5, "y_min": 0, "y_max": 4}
+    """
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "name is required"}), 400
+    required = ("x_min", "x_max", "y_min", "y_max")
+    if any(k not in data for k in required):
+        return jsonify({"error": "x_min, x_max, y_min, y_max are required"}), 400
+    try:
+        zone = add_or_update_zone(
+            data["name"], data["x_min"], data["x_max"], data["y_min"], data["y_max"]
+        )
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e) or "Invalid zone data"}), 400
+    return jsonify({"status": "created", "zone": zone})
+
+
+@app.route("/api/zones/<name>", methods=["DELETE"])
+def remove_zone(name):
+    """Delete a zone by name."""
+    if delete_zone(name):
+        return jsonify({"status": "deleted", "name": name})
+    return jsonify({"error": f"Zone '{name}' not found"}), 404
+
+
 @app.route("/api/history/positions", methods=["GET"])
 def get_positions_history():
     """Get historical position estimates for a beacon."""
     beacon_id = request.args.get("beacon_id")
     if not beacon_id:
         return jsonify({"error": "beacon_id parameter is required"}), 400
+    beacon_id = beacon_id.strip().upper()
     limit = request.args.get("limit", 100, type=int)
     history = database.get_beacon_positions_history(beacon_id, limit)
     return jsonify({
@@ -519,6 +508,7 @@ def get_rssi_history():
     beacon_id = request.args.get("beacon_id")
     if not beacon_id:
         return jsonify({"error": "beacon_id parameter is required"}), 400
+    beacon_id = beacon_id.strip().upper()
     limit = request.args.get("limit", 100, type=int)
     history = database.get_rssi_history(beacon_id, limit)
     return jsonify({
@@ -622,97 +612,35 @@ def update_config():
     return jsonify({"status": "config_updated"})
 
 
-# --- Shift Kerja API ---
-@app.route("/api/shifts", methods=["GET", "POST", "PUT"])
-def manage_shifts():
+# --- Device (Beacon) Management API ---
+@app.route("/api/devices", methods=["GET", "POST"])
+def manage_devices():
     if request.method == "GET":
-        return jsonify({"shifts": database.get_shifts()})
-    
+        return jsonify({"devices": database.get_beacons_list()})
+
     data = request.get_json() or {}
-    nama_shift = data.get("nama_shift")
-    jam_mulai = data.get("jam_mulai")
-    jam_selesai = data.get("jam_selesai")
-    
-    if not all([nama_shift, jam_mulai, jam_selesai]):
-        return jsonify({"error": "nama_shift, jam_mulai, and jam_selesai are required"}), 400
-        
-    id_shift = data.get("id_shift") if request.method == "PUT" else None
-    
-    success = database.save_shift(nama_shift, jam_mulai, jam_selesai, id_shift)
-    if success:
-        return jsonify({"status": "success", "message": "Shift saved successfully"})
-    return jsonify({"error": "Failed to save shift"}), 500
-
-@app.route("/api/shifts/<int:id_shift>", methods=["DELETE"])
-def remove_shift(id_shift):
-    success = database.delete_shift(id_shift)
-    if success:
-        return jsonify({"status": "success", "message": "Shift deleted successfully"})
-    return jsonify({"error": "Failed to delete shift"}), 500
-
-
-# --- Petugas API ---
-@app.route("/api/petugas", methods=["GET", "POST", "PUT"])
-def manage_petugas():
-    if request.method == "GET":
-        return jsonify({"petugas": database.get_petugas_list()})
-        
-    data = request.get_json() or {}
-    nama = data.get("nama")
     beacon_id = data.get("beacon_id")
-    id_shift = data.get("id_shift")
-    
-    if not nama:
-        return jsonify({"error": "nama is required"}), 400
-        
-    id_petugas = data.get("id_petugas") if request.method == "PUT" else None
-    
-    success = database.save_petugas(nama, beacon_id, id_shift, id_petugas)
-    if success:
-        return jsonify({"status": "success", "message": "Petugas saved successfully"})
-    return jsonify({"error": "Failed to save petugas"}), 500
+    name = data.get("name")
 
-@app.route("/api/petugas/<int:id_petugas>", methods=["DELETE"])
-def remove_petugas(id_petugas):
-    success = database.delete_petugas(id_petugas)
-    if success:
-        return jsonify({"status": "success", "message": "Petugas deleted successfully"})
-    return jsonify({"error": "Failed to delete petugas"}), 500
+    if not beacon_id:
+        return jsonify({"error": "beacon_id is required"}), 400
 
-
-# --- Tugas Petugas API ---
-@app.route("/api/tasks", methods=["GET", "POST", "PUT"])
-def manage_tasks():
-    if request.method == "GET":
-        limit = request.args.get("limit", 100, type=int)
-        return jsonify({"tasks": database.get_tasks(limit)})
-        
-    data = request.get_json() or {}
-    id_petugas = data.get("id_petugas")
-    nama_tugas = data.get("nama_tugas")
-    target_ruangan = data.get("target_ruangan")
-    
-    if not all([id_petugas, nama_tugas, target_ruangan]):
-        return jsonify({"error": "id_petugas, nama_tugas, and target_ruangan are required"}), 400
-        
-    id_tugas = data.get("id_tugas") if request.method == "PUT" else None
-    
-    success = database.save_task(id_petugas, nama_tugas, target_ruangan, id_tugas)
+    success = database.upsert_device(beacon_id, name or f"Device {beacon_id[-8:]}")
     if success:
-        return jsonify({"status": "success", "message": "Tugas saved successfully"})
-    return jsonify({"error": "Failed to save tugas"}), 500
+        return jsonify({"status": "success", "message": "Device saved successfully"})
+    return jsonify({"error": "Failed to save device"}), 500
 
-@app.route("/api/tasks/<int:id_tugas>/status", methods=["PUT"])
-def update_task_state(id_tugas):
-    data = request.get_json() or {}
-    status_tugas = data.get("status_tugas")
-    if not status_tugas:
-        return jsonify({"error": "status_tugas is required"}), 400
-        
-    success = database.update_task_status(id_tugas, status_tugas)
+@app.route("/api/devices/tracked", methods=["GET"])
+def get_tracked_devices():
+    """Devices that have at least one saved position — usable candidates for the heatmap."""
+    return jsonify({"devices": database.get_tracked_beacons()})
+
+@app.route("/api/devices/<beacon_id>", methods=["DELETE"])
+def remove_device(beacon_id):
+    success = database.delete_beacon(beacon_id)
     if success:
-        return jsonify({"status": "success", "message": "Tugas status updated successfully"})
-    return jsonify({"error": "Failed to update tugas status"}), 500
+        return jsonify({"status": "success", "message": "Device deleted successfully"})
+    return jsonify({"error": "Failed to delete device"}), 500
 
 
 # --- Per-Node Calibration Endpoint ---
@@ -781,57 +709,79 @@ def get_calib_history():
 def get_heatmap_data():
     beacon_id = request.args.get("beacon_id")
     limit = request.args.get("limit", 500, type=int)
-    
+
     if not beacon_id:
         return jsonify({"error": "beacon_id parameter is required"}), 400
-        
+    beacon_id = beacon_id.strip().upper()
+
+    calibration = get_calibration_params()
+    stationary_radius = calibration.get("heatmap_stationary_radius_m", 0.5)
+    max_gap_seconds = calibration.get("heatmap_max_gap_seconds", 300)
+
     try:
         history = database.get_beacon_positions_history(beacon_id, limit)
         if not history:
-            return jsonify({"heatmap": [], "count": 0, "max_value": 0})
-            
+            return jsonify({
+                "heatmap": [], "count": 0, "max_value": 0,
+                "reason": "no_history",
+                "reason_detail": "This beacon has no saved positions yet — it has never been seen by 3+ anchors at once, so trilateration never ran for it.",
+            })
+
         # Reverse to chronological order (database returns descending)
         history = history[::-1]
-        
+
         grid = {} # (gx, gy) -> seconds
-        
+
         def parse_ts(ts_str):
             try:
                 return datetime.fromisoformat(ts_str.replace('Z', '+00:00')).replace(tzinfo=None)
             except Exception:
                 return datetime.utcnow()
-                
+
         for i in range(1, len(history)):
             p1 = history[i-1]
             p2 = history[i]
-            
+
             t1 = parse_ts(p1["timestamp"])
             t2 = parse_ts(p2["timestamp"])
             dt = (t2 - t1).total_seconds()
-            
-            # If offline / gap > 5 mins, skip
-            if dt > 300:
+
+            # If offline / gap too large, skip
+            if dt > max_gap_seconds:
                 continue
-                
+
             x1, y1 = p1["x"], p1["y"]
             x2, y2 = p2["x"], p2["y"]
             dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-            
-            # Stationary if moved < 0.5m
-            if dist < 0.5:
+
+            # Widen the "stationary" radius using the position's own trilateration
+            # error so estimation jitter isn't mistaken for movement.
+            err = p2.get("error") or 0
+            radius = max(stationary_radius, err * 1.5)
+
+            # Stationary if moved less than the radius
+            if dist < radius:
                 # Round to nearest 0.5m cell
                 gx = round(x2 * 2) / 2.0
                 gy = round(y2 * 2) / 2.0
                 grid[(gx, gy)] = grid.get((gx, gy), 0.0) + dt
-                
+
         heatmap_list = [{"x": k[0], "y": k[1], "value": round(v, 1)} for k, v in grid.items()]
         max_val = max([h["value"] for h in heatmap_list]) if heatmap_list else 0.0
-        
-        return jsonify({
+
+        response = {
             "heatmap": heatmap_list,
             "max_value": round(max_val, 1),
             "count": len(heatmap_list)
-        })
+        }
+        if not heatmap_list:
+            response["reason"] = "no_stationary_dwell"
+            response["reason_detail"] = (
+                f"Found {len(history)} position(s) for this beacon, but it never stayed within "
+                f"~{stationary_radius}m for long enough between readings — it was always moving, "
+                "or the gaps between readings were too large."
+            )
+        return jsonify(response)
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve heatmap: {str(e)}"}), 500
 

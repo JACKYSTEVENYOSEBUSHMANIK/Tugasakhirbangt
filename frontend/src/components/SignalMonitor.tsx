@@ -85,7 +85,7 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
           value={beaconId}
           onChange={(e) => setBeaconId(e.target.value)}
         />
-        <small style={{ color: '#aaa' }}>Membantu mengunci beacon tertentu yang berada tepat 1 meter dari node.</small>
+        <small style={{ color: 'var(--text-muted)' }}>Membantu mengunci beacon tertentu yang berada tepat 1 meter dari node.</small>
       </div>
 
       <div className="layout-split">
@@ -94,11 +94,11 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
           <div className="anchors-list-calib">
             {anchors.map((a) => (
               <div key={a.anchor_id} className="anchor-item" style={{
-                border: '1px solid rgba(255, 255, 255, 0.06)',
+                border: '1px solid var(--border)',
                 borderRadius: '10px',
                 padding: '14px 18px',
                 marginBottom: '12px',
-                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                backgroundColor: 'var(--surface-alt)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
@@ -106,10 +106,10 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
               }}>
                 <div>
                   <h4 style={{ margin: '0 0 4px 0' }}>{a.label} ({a.anchor_id})</h4>
-                  <span style={{ fontSize: '0.85em', color: a.online ? '#2ecc71' : '#e74c3c' }}>
+                  <span style={{ fontSize: '0.85em', color: a.online ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>
                     ● {a.online ? 'Online' : 'Offline'}
                   </span>
-                  <span style={{ fontSize: '0.85em', color: '#aaa', marginLeft: '12px' }}>
+                  <span style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginLeft: '12px' }}>
                     Beacon terdeteksi: {a.beacons_detected}
                   </span>
                 </div>
@@ -129,8 +129,8 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
           <div className="warnings-list" style={{
             maxHeight: '220px',
             overflowY: 'auto',
-            backgroundColor: 'rgba(0, 0, 0, 0.25)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
+            backgroundColor: 'var(--surface-alt)',
+            border: '1px solid var(--border)',
             borderRadius: '10px',
             padding: '12px'
           }}>
@@ -144,16 +144,16 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
                   borderLeft: '4px solid var(--warning)',
                   padding: '10px',
                   marginBottom: '10px',
-                  backgroundColor: 'rgba(251, 191, 36, 0.05)',
+                  backgroundColor: 'var(--warning-soft)',
                   borderRadius: '0 8px 8px 0',
-                  border: '1px solid rgba(251, 191, 36, 0.1)',
+                  border: '1px solid rgba(217, 119, 6, 0.2)',
                   borderLeftWidth: '4px'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8em', color: '#e67e22', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8em', color: '#b45309', marginBottom: '4px' }}>
                     <span><strong>{w.source} WARNING</strong></span>
                     <span>{w.time_str}</span>
                   </div>
-                  <div style={{ fontSize: '0.9em', color: '#f39c12' }}>{w.message}</div>
+                  <div style={{ fontSize: '0.9em', color: '#78350f', fontWeight: '500' }}>{w.message}</div>
                 </div>
               ))
             )}
@@ -182,9 +182,9 @@ function SignalMonitor({ anchors }: SignalMonitorProps) {
                 history.map((h) => (
                   <tr key={h.log_id}>
                     <td><strong>{h.anchor_id}</strong></td>
-                    <td style={{ color: '#e74c3c' }}>{h.p_tx_old} dBm</td>
-                    <td style={{ color: '#2ecc71', fontWeight: 'bold' }}>{h.p_tx_new} dBm</td>
-                    <td style={{ fontSize: '0.85em', color: '#aaa' }}>
+                    <td style={{ color: 'var(--danger)', fontWeight: 'bold' }}>{h.p_tx_old} dBm</td>
+                    <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>{h.p_tx_new} dBm</td>
+                    <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}>
                       {new Date(h.calibrated_at).toLocaleString()}
                     </td>
                   </tr>

@@ -79,13 +79,13 @@ def check_anomalies(beacon_id, anchor_id):
                 message = f"Potensi interferensi terdeteksi pada node {anchor_id} untuk perangkat {beacon_id[-8:]}. Sinyal turun {drop_amount} dBm saat perangkat diam."
                 print(f"[ANOMALY] {message}")
                 
-                # Save to database system logs
-                database.save_system_log(
-                    "WARN", 
-                    "SYSTEM", 
-                    message, 
-                    {"beacon_id": beacon_id, "anchor_id": anchor_id, "drop_db": drop_amount}
-                )
+                # Save to database system logs asynchronously to prevent deadlocks
+                import threading
+                threading.Thread(
+                    target=database.save_system_log,
+                    args=("WARN", "SYSTEM", message, {"beacon_id": beacon_id, "anchor_id": anchor_id, "drop_db": drop_amount}),
+                    daemon=True
+                ).start()
                 
                 # Set cooldown
                 alert_cooldowns[cooldown_key] = now
